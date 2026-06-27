@@ -1,0 +1,91 @@
+// AIPC database schema — Phase 1: price + benchmark data layer.
+// Dev: SQLite (file-based). Production: migrate provider to postgresql.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// Canonical hardware part. `specsJson` keeps category-specific fields
+/// (socket, vramGb, formFactor, ...) without one column per attribute.
+model Part {
+  id           String   @id
+  category     String
+  name         String
+  brand        String
+  chipset      String?
+  imageUrl     String?
+  productUrl   String?
+  tags         String
+  summary      String
+  specsJson    String
+  listPriceUsd Float
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([category])
+  @@index([brand])
+
+  priceSnapshots  PriceSnapshot[]
+  benchmarkResults BenchmarkResult[]
+}
+
+/// One row per (part, retailer, timestamp). Append-only — never mutated.
+/// This is what powers the historical price curve.
+model PriceSnapshot {
+  id          String   @id @default(cuid())
+  partId      String
+  retailer    String   // "bestbuy" | "pcpartpicker" | "newegg" | "list"
+  region      String   @default("US") // ISO-3166-1 alpha-2
+  priceUsd    Float
+  currency    String   @default("USD")
+  inStock     Boolean  @default(true)
+  url         String?
+  capturedAt  DateTime @default(now())
+
+  part        Part     @relation(fields: [partId], references: [id], onDelete: Cascade)
+
+  @@index([partId, capturedAt])
+  @@index([retailer, capturedAt])
+  @@index([partId, retailer, capturedAt])
+}
+
+/// A single benchmark measurement for one part.
+/// One part can have many rows across benchmarks/games/resolutions.
+model BenchmarkResult {
+  id            String   @id @default(cuid())
+  partId        String
+  // e.g. "cyberpunk-2077", "blender-classroom", "llama-70b-q4"
+  benchmarkKey  String
+  benchmarkKind String   // "fps" | "render-seconds" | "tokens-per-second" | "score"
+  workload      String   // e.g. "gaming", "ai-inference", "rendering"
+  resolution    String?  // "1080p" | "1440p" | "4k" | null
+  quality       String?  // "ultra" | "high" | "medium" ...
+  value         Float    // the headline number (fps / seconds / tok/s)
+  unit          String   // "fps" | "s" | "tok/s" | "pts"
+  sourceName    String   // e.g. "TechPowerUp", "OpenLLM", "Blender Open Data"
+  sourceUrl     String?
+  publishedAt   DateTime?
+  capturedAt    DateTime @default(now())
+
+  part          Part     @relation(fields: [partId], references: [id], onDelete: Cascade)
+
+  @@index([partId, benchmarkKey])
+  @@index([benchmarkKind, workload])
+  @@index([benchmarkKey, resolution, quality])
+}
+
+/// Sync run log — useful for cron monitoring and debugging stale data.
+model SyncRun {
+  id          String   @id @default(cuid())
+  source      String   // "bestbuy" | "benchmarks-techpowerup" | ...
+  status      String   // "ok" | "partial" | "failed"
+  partsTouched Int     @default(0)
+  error       String?
+  startedAt   DateTime @default(now())
+  finishedAt  DateTime?
+}

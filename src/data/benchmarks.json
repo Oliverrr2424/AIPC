@@ -1,0 +1,96 @@
+{
+  "_comment": "Curated public benchmark data for AIPC. Numbers are approximate averages from TechPowerUp, Hardware Unboxed, Blender Open Data, and llama.cpp community benchmarks (2024-2025 reviews). Cite via sourceName/sourceUrl.",
+  "_sources": [
+    { "name": "TechPowerUp", "url": "https://www.techpowerup.com/reviews" },
+    { "name": "Hardware Unboxed", "url": "https://www.youtube.com/@HardwareUnboxed" },
+    { "name": "Blender Open Data", "url": "https://opendata.blender.org" },
+    { "name": "llama.cpp", "url": "https://github.com/ggerganov/llama.cpp" }
+  ],
+  "results": [
+    { "partId": "gpu-4060", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "1080p", "quality": "ultra", "value": 75, "unit": "fps", "sourceName": "TechPowerUp", "sourceUrl": "https://www.techpowerup.com/reviews" },
+    { "partId": "gpu-4060", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "1440p", "quality": "ultra", "value": 55, "unit": "fps", "sourceName": "TechPowerUp" },
+    { "partId": "gpu-4060", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "4k", "quality": "ultra", "value": 28, "unit": "fps", "sourceName": "TechPowerUp" },
+    { "partId": "gpu-4060", "benchmarkKey": "llama-7b-q4", "benchmarkKind": "tokens-per-second", "workload": "ai-inference", "value": 50, "unit": "tok/s", "sourceName": "llama.cpp" },
+    { "partId": "gpu-4060", "benchmarkKey": "blender-classroom", "benchmarkKind": "render-seconds", "workload": "rendering", "value": 32, "unit": "s", "sourceName": "Blender Open Data" },
+
+    { "partId": "gpu-4060ti-16", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "1080p", "quality": "ultra", "value": 95, "unit": "fps", "sourceName": "TechPowerUp" },
+    { "partId": "gpu-4060ti-16", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "1440p", "quality": "ultra", "value": 70, "unit": "fps", "sourceName": "TechPowerUp" },
+    { "partId": "gpu-4060ti-16", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "4k", "quality": "ultra", "value": 35, "unit": "fps", "sourceName": "TechPowerUp" },
+    { "partId": "gpu-4060ti-16", "benchmarkKey": "llama-7b-q4", "benchmarkKind": "tokens-per-second", "workload": "ai-inference", "value": 65, "unit": "tok/s", "sourceName": "llama.cpp" },
+    { "partId": "gpu-4060ti-16", "benchmarkKey": "blender-classroom", "benchmarkKind": "render-seconds", "workload": "rendering", "value": 22, "unit": "s", "sourceName": "Blender Open Data" },
+
+    { "partId": "gpu-4070s", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "1080p", "quality": "ultra", "value": 130, "unit": "fps", "sourceName": "TechPowerUp" },
+    { "partId": "gpu-4070s", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "1440p", "quality": "ultra", "value": 105, "unit": "fps", "sourceName": "TechPowerUp" },
+    { "partId": "gpu-4070s", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "4k", "quality": "ultra", "value": 55, "unit": "fps", "sourceName": "TechPowerUp" },
+    { "partId": "gpu-4070s", "benchmarkKey": "llama-7b-q4", "benchmarkKind": "tokens-per-second", "workload": "ai-inference", "value": 75, "unit": "tok/s", "sourceName": "llama.cpp" },
+    { "partId": "gpu-4070s", "benchmarkKey": "llama-13b-q4", "benchmarkKind": "tokens-per-second", "workload": "ai-inference", "value": 38, "unit": "tok/s", "sourceName": "llama.cpp" },
+    { "partId": "gpu-4070s", "benchmarkKey": "blender-classroom", "benchmarkKind": "render-seconds", "workload": "rendering", "value": 16, "unit": "s", "sourceName": "Blender Open Data" },
+
+    { "partId": "gpu-4070tis", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "1080p", "quality": "ultra", "value": 155, "unit": "fps", "sourceName": "TechPowerUp" },
+    { "partId": "gpu-4070tis", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "1440p", "quality": "ultra", "value": 125, "unit": "fps", "sourceName": "TechPowerUp" },
+    { "partId": "gpu-4070tis", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "4k", "quality": "ultra", "value": 70, "unit": "fps", "sourceName": "TechPowerUp" },
+    { "partId": "gpu-4070tis", "benchmarkKey": "llama-7b-q4", "benchmarkKind": "tokens-per-second", "workload": "ai-inference", "value": 95, "unit": "tok/s", "sourceName": "llama.cpp" },
+    { "partId": "gpu-4070tis", "benchmarkKey": "llama-13b-q4", "benchmarkKind": "tokens-per-second", "workload": "ai-inference", "value": 48, "unit": "tok/s", "sourceName": "llama.cpp" },
+    { "partId": "gpu-4070tis", "benchmarkKey": "blender-classroom", "benchmarkKind": "render-seconds", "workload": "rendering", "value": 12, "unit": "s", "sourceName": "Blender Open Data" },
+
+    { "partId": "gpu-4080s", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "1080p", "quality": "ultra", "value": 175, "unit": "fps", "sourceName": "TechPowerUp" },
+    { "partId": "gpu-4080s", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "1440p", "quality": "ultra", "value": 145, "unit": "fps", "sourceName": "TechPowerUp" },
+    { "partId": "gpu-4080s", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "4k", "quality": "ultra", "value": 85, "unit": "fps", "sourceName": "TechPowerUp" },
+    { "partId": "gpu-4080s", "benchmarkKey": "llama-7b-q4", "benchmarkKind": "tokens-per-second", "workload": "ai-inference", "value": 120, "unit": "tok/s", "sourceName": "llama.cpp" },
+    { "partId": "gpu-4080s", "benchmarkKey": "llama-13b-q4", "benchmarkKind": "tokens-per-second", "workload": "ai-inference", "value": 62, "unit": "tok/s", "sourceName": "llama.cpp" },
+    { "partId": "gpu-4080s", "benchmarkKey": "llama-70b-q4", "benchmarkKind": "tokens-per-second", "workload": "ai-inference", "value": 18, "unit": "tok/s", "sourceName": "llama.cpp" },
+    { "partId": "gpu-4080s", "benchmarkKey": "blender-classroom", "benchmarkKind": "render-seconds", "workload": "rendering", "value": 9, "unit": "s", "sourceName": "Blender Open Data" },
+
+    { "partId": "gpu-4090", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "1080p", "quality": "ultra", "value": 210, "unit": "fps", "sourceName": "TechPowerUp" },
+    { "partId": "gpu-4090", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "1440p", "quality": "ultra", "value": 180, "unit": "fps", "sourceName": "TechPowerUp" },
+    { "partId": "gpu-4090", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "4k", "quality": "ultra", "value": 120, "unit": "fps", "sourceName": "TechPowerUp" },
+    { "partId": "gpu-4090", "benchmarkKey": "llama-7b-q4", "benchmarkKind": "tokens-per-second", "workload": "ai-inference", "value": 180, "unit": "tok/s", "sourceName": "llama.cpp" },
+    { "partId": "gpu-4090", "benchmarkKey": "llama-13b-q4", "benchmarkKind": "tokens-per-second", "workload": "ai-inference", "value": 95, "unit": "tok/s", "sourceName": "llama.cpp" },
+    { "partId": "gpu-4090", "benchmarkKey": "llama-70b-q4", "benchmarkKind": "tokens-per-second", "workload": "ai-inference", "value": 28, "unit": "tok/s", "sourceName": "llama.cpp" },
+    { "partId": "gpu-4090", "benchmarkKey": "blender-classroom", "benchmarkKind": "render-seconds", "workload": "rendering", "value": 5, "unit": "s", "sourceName": "Blender Open Data" },
+
+    { "partId": "gpu-4090-aero-white", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "1440p", "quality": "ultra", "value": 178, "unit": "fps", "sourceName": "TechPowerUp" },
+    { "partId": "gpu-4090-aero-white", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "4k", "quality": "ultra", "value": 118, "unit": "fps", "sourceName": "TechPowerUp" },
+    { "partId": "gpu-4090-aero-white", "benchmarkKey": "llama-70b-q4", "benchmarkKind": "tokens-per-second", "workload": "ai-inference", "value": 28, "unit": "tok/s", "sourceName": "llama.cpp" },
+    { "partId": "gpu-4090-aero-white", "benchmarkKey": "blender-classroom", "benchmarkKind": "render-seconds", "workload": "rendering", "value": 5.5, "unit": "s", "sourceName": "Blender Open Data" },
+
+    { "partId": "gpu-7800xt", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "1080p", "quality": "ultra", "value": 125, "unit": "fps", "sourceName": "Hardware Unboxed" },
+    { "partId": "gpu-7800xt", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "1440p", "quality": "ultra", "value": 95, "unit": "fps", "sourceName": "Hardware Unboxed" },
+    { "partId": "gpu-7800xt", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "4k", "quality": "ultra", "value": 48, "unit": "fps", "sourceName": "Hardware Unboxed" },
+    { "partId": "gpu-7800xt", "benchmarkKey": "llama-7b-q4", "benchmarkKind": "tokens-per-second", "workload": "ai-inference", "value": 45, "unit": "tok/s", "sourceName": "llama.cpp (Vulkan)" },
+    { "partId": "gpu-7800xt", "benchmarkKey": "blender-classroom", "benchmarkKind": "render-seconds", "workload": "rendering", "value": 30, "unit": "s", "sourceName": "Blender Open Data" },
+
+    { "partId": "gpu-7900xt", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "1080p", "quality": "ultra", "value": 165, "unit": "fps", "sourceName": "Hardware Unboxed" },
+    { "partId": "gpu-7900xt", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "1440p", "quality": "ultra", "value": 135, "unit": "fps", "sourceName": "Hardware Unboxed" },
+    { "partId": "gpu-7900xt", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "4k", "quality": "ultra", "value": 75, "unit": "fps", "sourceName": "Hardware Unboxed" },
+    { "partId": "gpu-7900xt", "benchmarkKey": "llama-7b-q4", "benchmarkKind": "tokens-per-second", "workload": "ai-inference", "value": 70, "unit": "tok/s", "sourceName": "llama.cpp (Vulkan)" },
+    { "partId": "gpu-7900xt", "benchmarkKey": "blender-classroom", "benchmarkKind": "render-seconds", "workload": "rendering", "value": 20, "unit": "s", "sourceName": "Blender Open Data" },
+
+    { "partId": "gpu-7900xtx", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "1080p", "quality": "ultra", "value": 190, "unit": "fps", "sourceName": "Hardware Unboxed" },
+    { "partId": "gpu-7900xtx", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "1440p", "quality": "ultra", "value": 165, "unit": "fps", "sourceName": "Hardware Unboxed" },
+    { "partId": "gpu-7900xtx", "benchmarkKey": "cyberpunk-2077", "benchmarkKind": "fps", "workload": "gaming", "resolution": "4k", "quality": "ultra", "value": 100, "unit": "fps", "sourceName": "Hardware Unboxed" },
+    { "partId": "gpu-7900xtx", "benchmarkKey": "llama-7b-q4", "benchmarkKind": "tokens-per-second", "workload": "ai-inference", "value": 95, "unit": "tok/s", "sourceName": "llama.cpp (Vulkan)" },
+    { "partId": "gpu-7900xtx", "benchmarkKey": "blender-classroom", "benchmarkKind": "render-seconds", "workload": "rendering", "value": 16, "unit": "s", "sourceName": "Blender Open Data" },
+
+    { "partId": "cpu-r5-7600", "benchmarkKey": "blender-classroom-cpu", "benchmarkKind": "render-seconds", "workload": "rendering", "value": 28, "unit": "s", "sourceName": "Blender Open Data" },
+    { "partId": "cpu-r5-7600", "benchmarkKey": "cinebench-2024-multi", "benchmarkKind": "score", "workload": "productivity", "value": 650, "unit": "pts", "sourceName": "TechPowerUp" },
+
+    { "partId": "cpu-r7-7700", "benchmarkKey": "blender-classroom-cpu", "benchmarkKind": "render-seconds", "workload": "rendering", "value": 22, "unit": "s", "sourceName": "Blender Open Data" },
+    { "partId": "cpu-r7-7700", "benchmarkKey": "cinebench-2024-multi", "benchmarkKind": "score", "workload": "productivity", "value": 880, "unit": "pts", "sourceName": "TechPowerUp" },
+
+    { "partId": "cpu-r7-7800x3d", "benchmarkKey": "blender-classroom-cpu", "benchmarkKind": "render-seconds", "workload": "rendering", "value": 22, "unit": "s", "sourceName": "Blender Open Data" },
+    { "partId": "cpu-r7-7800x3d", "benchmarkKey": "cinebench-2024-multi", "benchmarkKind": "score", "workload": "productivity", "value": 900, "unit": "pts", "sourceName": "TechPowerUp" },
+
+    { "partId": "cpu-r7-9800x3d", "benchmarkKey": "blender-classroom-cpu", "benchmarkKind": "render-seconds", "workload": "rendering", "value": 20, "unit": "s", "sourceName": "Blender Open Data" },
+    { "partId": "cpu-r7-9800x3d", "benchmarkKey": "cinebench-2024-multi", "benchmarkKind": "score", "workload": "productivity", "value": 950, "unit": "pts", "sourceName": "TechPowerUp" },
+
+    { "partId": "cpu-r9-7900x", "benchmarkKey": "blender-classroom-cpu", "benchmarkKind": "render-seconds", "workload": "rendering", "value": 15, "unit": "s", "sourceName": "Blender Open Data" },
+    { "partId": "cpu-r9-7900x", "benchmarkKey": "cinebench-2024-multi", "benchmarkKind": "score", "workload": "productivity", "value": 1450, "unit": "pts", "sourceName": "TechPowerUp" },
+
+    { "partId": "cpu-i5-14600k", "benchmarkKey": "blender-classroom-cpu", "benchmarkKind": "render-seconds", "workload": "rendering", "value": 18, "unit": "s", "sourceName": "Blender Open Data" },
+    { "partId": "cpu-i5-14600k", "benchmarkKey": "cinebench-2024-multi", "benchmarkKind": "score", "workload": "productivity", "value": 1100, "unit": "pts", "sourceName": "TechPowerUp" },
+
+    { "partId": "cpu-i7-14700k", "benchmarkKey": "blender-classroom-cpu", "benchmarkKind": "render-seconds", "workload": "rendering", "value": 13, "unit": "s", "sourceName": "Blender Open Data" },
+    { "partId": "cpu-i7-14700k", "benchmarkKey": "cinebench-2024-multi", "benchmarkKind": "score", "workload": "productivity", "value": 1700, "unit": "pts", "sourceName": "TechPowerUp" }
+  ]
+}

@@ -66,7 +66,7 @@ export async function generateRagBuild(sourceQuery: string, ai: AiGenerationOpti
   const psu = existing<BuildParts["psu"]>(request.existingPartIds, "psu") || first<BuildParts["psu"]>(pools.psu, part => part.wattage >= minimumPsu && pcCase.psuFormFactors.includes(part.formFactor)) || first<BuildParts["psu"]>(pools.psu, part => pcCase.psuFormFactors.includes(part.formFactor))!;
   const parts = optimizeToBudget({ ...provisional, psu }, pools, request);
   const totalPrice = Object.values(parts).reduce((sum, part) => sum + priceIn(part, request.currency), 0);
-  const compatibility = checkCompatibility(parts), performance = estimatePerformance(parts, request), estimatedWattage = estimateWattage(parts);
+  const compatibility = checkCompatibility(parts), performance = await estimatePerformance(parts, request), estimatedWattage = estimateWattage(parts);
   const selected = Object.entries(parts) as Array<[PartCategory, Part]>;
   const reasoning: RagReasoningItem[] = selected.map(([category, part]) => {
     const candidate = selectedCandidate(pools[category], part);

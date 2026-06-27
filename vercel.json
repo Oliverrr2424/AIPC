@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/sync?source=prices",
+      "schedule": "0 6,18 * * *"
+    },
+    {
+      "path": "/api/sync?source=benchmarks",
+      "schedule": "0 4 * * 1"
+    }
+  ]
+}

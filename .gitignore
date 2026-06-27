@@ -6,3 +6,6 @@ node_modules
 *.log
 *.tsbuildinfo
 .DS_Store
+# Prisma SQLite dev database (keep schema, ignore the data file)
+prisma/dev.db
+prisma/dev.db-journal

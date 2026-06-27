@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "aipc": {
+      "command": "npx",
+      "args": ["tsx", "src/lib/mcp/server.ts"],
+      "env": {
+        "DATABASE_URL": "file:./dev.db"
+      }
+    }
+  }
+}
