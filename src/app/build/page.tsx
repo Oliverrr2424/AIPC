@@ -1,0 +1,3 @@
+import type { Metadata } from "next";import { BuildForm } from "@/components/build/BuildForm";
+export const metadata:Metadata={title:"Build your PC"};
+export default function BuildPage(){return <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:py-16"><div className="mb-10 max-w-2xl"><p className="mono text-xs font-semibold text-[var(--accent)]">CONFIGURATION BRIEF</p><h1 className="mt-3 text-4xl font-semibold tracking-tight sm:text-5xl">Tell us what the machine needs to do.</h1><p className="mt-4 text-lg leading-8 text-[var(--muted)]">A few constraints are enough. You can inspect every decision in the result.</p></div><BuildForm/></div>}

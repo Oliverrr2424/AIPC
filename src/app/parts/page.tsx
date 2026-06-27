@@ -1,0 +1,3 @@
+import type { Metadata } from "next";import { parts } from "@/data/parts";import { PartsBrowser } from "@/components/parts/PartsBrowser";
+export const metadata:Metadata={title:"Parts database"};
+export default function PartsPage(){return <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6"><div className="max-w-2xl"><p className="mono text-xs font-semibold text-[var(--accent)]">STRUCTURED HARDWARE DATA</p><h1 className="mt-3 text-4xl font-semibold tracking-tight sm:text-5xl">Parts database</h1><p className="mt-4 text-lg leading-8 text-[var(--muted)]">The recommendation engine uses these normalized specifications, scores, and estimated USD prices.</p></div><PartsBrowser parts={parts}/></div>}

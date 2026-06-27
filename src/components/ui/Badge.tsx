@@ -1,0 +1,2 @@
+import type { ReactNode } from "react";
+export function Badge({children,tone="neutral"}:{children:ReactNode;tone?:"neutral"|"success"|"warning"|"danger"|"accent"}){const map={neutral:"bg-[var(--panel-2)] text-[var(--muted)]",success:"bg-emerald-500/10 text-[var(--success)]",warning:"bg-amber-500/10 text-[var(--warning)]",danger:"bg-red-500/10 text-[var(--danger)]",accent:"bg-[var(--accent-soft)] text-[var(--accent)]"};return <span className={`inline-flex items-center whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-semibold ${map[tone]}`}>{children}</span>}
