@@ -53,9 +53,16 @@ function heuristic(query: string): ParsedIntent {
   const budget = money ? Number(money[1].replace(/,/g, "")) : 2000;
   const useCase: UseCase = /ai|llm|cuda|stable diffusion|flux|机器学习|人工智能|大模型|模型训练/.test(q) ? "ai" : /剪辑|视频|davinci|premiere/.test(q) ? "video" : /开发|docker|编译|数据库|android|ios/.test(q) ? "development" : /游戏|gaming|fps|4k|1440p|1080p/.test(q) ? "gaming" : "balanced";
   const existingPartIds = parts.filter(part => q.includes(part.name.toLowerCase()) || q.includes(part.id)).map(part => part.id);
+  // Currency detection — check USD FIRST so "美元" (which contains the
+  // character 元) is not misread as CNY. Order: CAD → USD → CNY → default USD.
+  const isCad = /cad|加币|加拿大/.test(q);
+  const isUsd = /美元|usd|\$|美金|刀/.test(q);
+  const isCny = /cny|人民币|rmb|(^|[^\u4e00])元([^\u4e00]|$)|块/.test(q);
+  const currency: "CAD" | "USD" | "CNY" = isCad ? "CAD" : isUsd ? "USD" : isCny ? "CNY" : "USD";
+  const country: "Canada" | "US" | "China" = isCad ? "Canada" : isUsd ? "US" : /中国|china|人民币|cny/.test(q) ? "China" : "US";
   return {
     budget: Number.isFinite(budget) && budget >= 700 ? budget : 2000,
-    currency: /cad|加币|加拿大/.test(q) ? "CAD" : /cny|人民币|元|块/.test(q) ? "CNY" : "USD", country: /加拿大|canada|cad/.test(q) ? "Canada" : /中国|china|人民币|cny|元/.test(q) ? "China" : "US",
+    currency, country,
     useCase, resolution: /4k/.test(q) ? "4k" : /1440p|2k/.test(q) ? "1440p" : /1080p/.test(q) ? "1080p" : undefined,
     targetFps: /240\s*fps/.test(q) ? 240 : /144\s*fps/.test(q) ? 144 : /120\s*fps/.test(q) ? 120 : /60\s*fps/.test(q) ? 60 : undefined,
     vramPreference: /32\s*gb/.test(q) ? 32 : /24\s*gb/.test(q) ? 24 : /16\s*gb/.test(q) ? 16 : /12\s*gb/.test(q) ? 12 : undefined,
