@@ -4,7 +4,8 @@ import { ArrowRight, Brain, CheckCircle, Database, MagnifyingGlass, SpinnerGap, 
 import type { RagBuildRecommendation } from "@/types/knowledge";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { CurveLoader } from "@/components/ui/CurveLoader";
+import { BuildCurveLoader } from "@/components/ui/CurveLoader";
+import { LoaderVariantPicker } from "@/components/ui/LoaderVariantPicker";
 import { formatPrice } from "@/lib/pricing/priceEstimator";
 import { PartsTable } from "./PartsTable";
 import { CompatibilityPanel } from "./CompatibilityPanel";
@@ -66,10 +67,11 @@ export function RagChat() {
           </div>
           <Button disabled={loading || query.trim().length < 8} className="mt-7 w-full">{loading ? <><SpinnerGap className="animate-spin"/>Retrieving evidence</> : <>Build with RAG <ArrowRight/></>}</Button>
           {error && <p className="mt-4 rounded-lg bg-red-500/10 p-3 text-sm text-[var(--danger)]">{error}</p>}
+          <div className="mt-7 border-t border-[var(--line)] pt-6"><LoaderVariantPicker compact/></div>
         </aside>
       </div>
     </form>
-    {loading && <div className="mt-10 surface rounded-2xl p-10 sm:p-16"><CurveLoader label="Synthesizing your build" size={240}/></div>}
+    {loading && <div className="mt-10 surface rounded-2xl p-10 sm:p-16"><BuildCurveLoader label="Synthesizing your build" size={240}/></div>}
     {result && <RagResult result={result}/>} 
   </div>;
 }
@@ -100,5 +102,3 @@ function RagResult({ result }: { result: RagBuildRecommendation }) {
     <div className="grid gap-6 lg:grid-cols-[1fr_380px]"><AiExplanationPanel text={result.explanation}/><section className="surface rounded-2xl p-6"><h2 className="text-lg font-semibold">Alternative builds</h2><p className="mt-1 text-sm text-[var(--muted)]">Nearby paths from the same candidate pools</p><div className="mt-5 space-y-5">{result.alternativeBuilds.map(variant => <div key={variant.title} className="rounded-xl bg-[var(--panel-2)] p-4"><div className="font-semibold">{variant.title}</div><div className="mono mt-2 text-sm text-[var(--accent)]">{formatPrice(variant.totalPrice, result.request.currency)}</div><p className="mt-2 text-sm leading-6 text-[var(--muted)]">{variant.changes.map(change => `${change.from} to ${change.to}`).join("; ")}. {variant.tradeoff}</p></div>)}</div></section></div>
   </div>;
 }
-
-function RagSkeleton() { return <div className="mt-10 surface rounded-2xl p-10 sm:p-16 flex justify-center"><CurveLoader label="Synthesizing your build" size={240}/></div>; }

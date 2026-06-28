@@ -6,7 +6,7 @@ An explainable RAG-augmented PC recommendation system built with Next.js, React,
 
 - **Live price data layer** with provider abstraction (BestBuy API + PCPartPicker fallback + list baseline)
 - **Historical price storage** — one `PriceSnapshot` row per (part, retailer, timestamp), powering the 30-day price chart
-- **Scheduled sync** — Vercel Cron triggers `/api/sync` at 06:00 & 18:00 US time for prices, weekly for benchmarks
+- **Scheduled sync** — Vercel Cron triggers `/api/sync` at 06:00 & 18:00 UTC for prices, weekly for benchmarks
 - **Public benchmark database** — curated from TechPowerUp / Hardware Unboxed / Blender Open Data / llama.cpp
 - **Real numeric estimates** — FPS (Cyberpunk 2077), token/s (Llama 7B/13B/70B Q4), Blender Classroom render seconds, Cinebench 2024
 - **MCP tool surface** — price / benchmark / compatibility / performance exposed as MCP tools for AI agents
@@ -36,7 +36,7 @@ flowchart TB
     DB[(SQLite / Prisma)]
     Prices["Price providers\nBestBuy · PCPartPicker · List"]
     Bench["Benchmark DB\nTechPowerUp · Blender · llama.cpp"]
-    Cron["Vercel Cron\n06:00 & 18:00 US"]
+    Cron["Vercel Cron\n06:00 & 18:00 UTC"]
   end
   subgraph Engine["Recommendation engine"]
     Intent["intentParser"]
@@ -50,7 +50,7 @@ flowchart TB
   subgraph MCP["MCP server"]
     Tools["7 tools\nprice · compat · perf · sync"]
   end
-  Cron -->|POST /api/sync| Prices --> DB
+  Cron -->|GET /api/sync| Prices --> DB
   Cron --> Bench --> DB
   Bench --> Perf
   DB --> Perf
@@ -80,6 +80,7 @@ Copy `.env.example` to `.env.local`:
 | `DEEPSEEK_API_KEY` | DeepSeek V4 for intent parsing + explanation. | no |
 | `GEMINI_API_KEY` | Gemini 2.5 Flash as alternate AI provider. | no |
 | `SYNC_API_TOKEN` | Bearer token protecting `/api/sync`. Open in dev, required in prod. | prod |
+| `CRON_SECRET` | Secret Vercel sends as a bearer token on scheduled sync requests. | Vercel prod |
 | `PRICE_REGION` | Default `US`. | no |
 
 ## API
@@ -90,7 +91,7 @@ Copy `.env.example` to `.env.local`:
 | `/api/rag/recommend` | POST | Natural-language RAG build generation |
 | `/api/parts/[partId]` | GET | Current price + 30d stats + benchmarks for one part |
 | `/api/prices?partIds=...&days=30` | GET | Historical price series (or `&current=1` for latest only) |
-| `/api/sync?source=prices\|benchmarks\|all` | POST | Trigger a sync run (cron or manual) |
+| `/api/sync?source=prices\|benchmarks\|all` | GET / POST | Trigger a sync run (GET for Vercel Cron, POST for manual use) |
 
 ## MCP server
 

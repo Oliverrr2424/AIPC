@@ -20,11 +20,31 @@ interface BestBuyProduct {
 }
 
 function buildQuery(part: { name: string; brand: string }): string {
-  // BestBuy query syntax: (search=foo&manufacturer=bar)
-  const name = part.name.replace(/["()]/g, "").slice(0, 60);
-  const brand = part.brand.slice(0, 30);
-  const escaped = encodeURIComponent(`(search=${name})`);
-  return `(${escaped})`;
+  // Best Buy filters are part of the URL path. Encode values individually,
+  // rather than encoding the entire `(search=...)` expression.
+  const source = part.name.toLowerCase().includes(part.brand.toLowerCase())
+    ? part.name
+    : `${part.brand} ${part.name}`;
+  const terms = source
+    .replace(/["()]/g, " ")
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length > 1)
+    .slice(0, 8);
+  return `(${terms.map((term) => `search=${encodeURIComponent(term)}`).join("&")})`;
+}
+
+export function buildBestBuyProductsUrl(
+  part: { name: string; brand: string },
+  apiKey: string,
+): string {
+  const params = new URLSearchParams({
+    format: "json",
+    apiKey,
+    show: "sku,name,regularPrice,salePrice,onSale,onlineAvailability,addToCartUrl,url",
+    pageSize: "1",
+  });
+  return `${BASE}/products${buildQuery(part)}?${params.toString()}`;
 }
 
 export class BestBuyProvider implements PriceProvider {
@@ -42,7 +62,7 @@ export class BestBuyProvider implements PriceProvider {
 
   async fetchQuote(part: { id: string; name: string; brand: string; category: string }): Promise<PriceQuote | null> {
     if (!this.isConfigured()) return null;
-    const url = `${BASE}/products${buildQuery(part)}?format=json&apiKey=${this.apiKey}&show=sku,name,regularPrice,salePrice,onSale,onlineAvailability,addToCartUrl,url&pageSize=1`;
+    const url = buildBestBuyProductsUrl(part, this.apiKey!);
     try {
       const res = await fetch(url, { headers: { Accept: "application/json" } });
       if (!res.ok) return null;

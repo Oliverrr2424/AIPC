@@ -6,19 +6,20 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 function authorized(req: Request): boolean {
-  // Vercel Cron sends "CRON" header, or bearer via SYNC_API_TOKEN env.
-  const token = process.env.SYNC_API_TOKEN;
-  if (!token) return process.env.NODE_ENV === "development"; // open in dev by default
+  // Vercel Cron sends `Authorization: Bearer <CRON_SECRET>`.
+  const tokens = [process.env.CRON_SECRET, process.env.SYNC_API_TOKEN].filter(Boolean);
+  if (tokens.length === 0) return process.env.NODE_ENV === "development";
   const auth = req.headers.get("authorization") ?? "";
-  const cronHeader = req.headers.get("x-vercel-cron") ?? "";
-  return auth === `Bearer ${token}` || cronHeader === "1";
+  return tokens.some((token) => auth === `Bearer ${token}`);
 }
 
-// POST /api/sync?source=prices|benchmarks|all
-export async function POST(req: Request) {
+async function handleSync(req: Request) {
   if (!authorized(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const url = new URL(req.url);
   const source = url.searchParams.get("source") ?? "all";
+  if (!new Set(["prices", "benchmarks", "all"]).has(source)) {
+    return NextResponse.json({ error: "source must be prices, benchmarks, or all" }, { status: 400 });
+  }
   const result: Record<string, unknown> = {};
   if (source === "prices" || source === "all") {
     result.prices = await syncPrices();
@@ -28,3 +29,7 @@ export async function POST(req: Request) {
   }
   return NextResponse.json({ ok: true, source, result });
 }
+
+// Vercel Cron invokes GET; POST remains available for manual/admin triggers.
+export const GET = handleSync;
+export const POST = handleSync;

@@ -10,11 +10,11 @@
     "typecheck": "tsc --noEmit",
     "test:rag": "node scripts/rag-regression.mjs",
     "db:generate": "prisma generate",
-    "db:push": "prisma db push",
-    "db:seed": "tsx scripts/seed.ts",
-    "sync:prices": "tsx scripts/sync-prices.ts",
-    "sync:benchmarks": "tsx scripts/sync-benchmarks.ts",
-    "sync:all": "tsx scripts/seed.ts && tsx scripts/sync-prices.ts && tsx scripts/sync-benchmarks.ts"
+    "db:push": "DATABASE_URL=${DATABASE_URL:-file:./dev.db} prisma db push",
+    "db:seed": "DATABASE_URL=${DATABASE_URL:-file:./dev.db} tsx scripts/seed.ts",
+    "sync:prices": "DATABASE_URL=${DATABASE_URL:-file:./dev.db} tsx scripts/sync-prices.ts",
+    "sync:benchmarks": "DATABASE_URL=${DATABASE_URL:-file:./dev.db} tsx scripts/sync-benchmarks.ts",
+    "sync:all": "npm run db:seed && npm run sync:prices && npm run sync:benchmarks"
   },
   "dependencies": {
     "@google/genai": "^2.10.0",

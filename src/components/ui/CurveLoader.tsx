@@ -1,80 +1,70 @@
 "use client";
 import { useEffect, useRef } from "react";
-
-// Fourier Flow — ported from Paidax01/math-curve-loaders (MIT-style gallery).
-// Multi-component sine/cosine interference; the outline mutates like a living
-// waveform. Used as the build-generation waiting state. All animation is done
-// via imperative SVG attribute writes (92 particles/frame would thrash React).
-
-interface FourierConfig {
-  fourierX1: number; fourierX3: number; fourierX5: number;
-  fourierY1: number; fourierY2: number; fourierY4: number;
-  fourierMixBase: number; fourierMixPulse: number;
-  particleCount: number; trailSpan: number;
-  durationMs: number; pulseDurationMs: number; strokeWidth: number;
-}
-
-const DEFAULT_CONFIG: FourierConfig = {
-  fourierX1: 17, fourierX3: 7.5, fourierX5: 3.2,
-  fourierY1: 15, fourierY2: 8.2, fourierY4: 4.2,
-  fourierMixBase: 1, fourierMixPulse: 0.16,
-  particleCount: 92, trailSpan: 0.31,
-  durationMs: 8400, pulseDurationMs: 6800, strokeWidth: 4.2,
-};
-
-function point(progress: number, detailScale: number, c: FourierConfig) {
-  const t = progress * Math.PI * 2;
-  const mix = c.fourierMixBase + detailScale * c.fourierMixPulse;
-  const x = c.fourierX1 * Math.cos(t) + c.fourierX3 * Math.cos(3 * t + 0.6 * mix) + c.fourierX5 * Math.sin(5 * t - 0.4);
-  const y = c.fourierY1 * Math.sin(t) + c.fourierY2 * Math.sin(2 * t + 0.25) - c.fourierY4 * Math.cos(4 * t - 0.5 * mix);
-  return { x: 50 + x, y: 50 + y };
-}
-
-function buildPath(c: FourierConfig, detailScale: number, steps = 480): string {
-  let d = "";
-  for (let i = 0; i <= steps; i++) {
-    const p = point(i / steps, detailScale, c);
-    d += `${i === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)} `;
-  }
-  return d.trim();
-}
+import {
+  CURVE_VARIANTS,
+  DEFAULT_LOADER_VARIANT,
+  type CurveLoaderVariant,
+  type CurveVariantDefinition,
+} from "@/lib/loaders/curveVariants";
+import { useLoaderVariant } from "@/lib/loaders/useLoaderVariant";
 
 function normalizeProgress(v: number): number {
   return v - Math.floor(v);
 }
 
-function getDetailScale(time: number, c: FourierConfig, phaseOffset: number): number {
-  const pulseProgress = ((time + phaseOffset * c.pulseDurationMs) % c.pulseDurationMs) / c.pulseDurationMs;
+function getDetailScale(time: number, def: CurveVariantDefinition, phaseOffset: number): number {
+  const pulseProgress = ((time + phaseOffset * def.pulseDurationMs) % def.pulseDurationMs) / def.pulseDurationMs;
   const pulseAngle = pulseProgress * Math.PI * 2;
   return 0.52 + ((Math.sin(pulseAngle + 0.55) + 1) / 2) * 0.48;
 }
 
-export interface CurveLoaderProps {
-  label?: string;
-  /** Size in px (square). Default 220. */
-  size?: number;
-  /** Override the default Fourier Flow config (rarely needed). */
-  config?: Partial<FourierConfig>;
-  className?: string;
+function getRotation(time: number, def: CurveVariantDefinition, phaseOffset: number): number {
+  if (!def.rotate) return 0;
+  return -(((time + phaseOffset * def.rotationDurationMs) % def.rotationDurationMs) / def.rotationDurationMs) * 360;
 }
 
-export function CurveLoader({ label, size = 220, config, className }: CurveLoaderProps) {
-  const cfg: FourierConfig = { ...DEFAULT_CONFIG, ...config };
+function buildPath(def: CurveVariantDefinition, detailScale: number, steps = 480): string {
+  let d = "";
+  for (let i = 0; i <= steps; i++) {
+    const p = def.point(i / steps, detailScale);
+    d += `${i === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)} `;
+  }
+  return d.trim();
+}
+
+export interface CurveLoaderProps {
+  label?: string;
+  size?: number;
+  variant?: CurveLoaderVariant;
+  className?: string;
+  /** Hide the variant name subtitle under the label. */
+  hideVariantTag?: boolean;
+}
+
+export function CurveLoader({
+  label,
+  size = 220,
+  variant = DEFAULT_LOADER_VARIANT,
+  className,
+  hideVariantTag = false,
+}: CurveLoaderProps) {
+  const def = CURVE_VARIANTS[variant];
   const groupRef = useRef<SVGGElement>(null);
   const pathRef = useRef<SVGPathElement>(null);
   const particlesRef = useRef<SVGCircleElement[]>([]);
-  const startRef = useRef<number>(0);
-  const phaseRef = useRef<number>(0);
+  const startRef = useRef(0);
+  const phaseRef = useRef(0);
 
   useEffect(() => {
     const reduceMotion = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const staticScale = 0.76;
+
     if (reduceMotion) {
-      // Static frame: draw the curve at mid-pulse, park particles along it.
-      if (pathRef.current) pathRef.current.setAttribute("d", buildPath(cfg, 0.76));
+      if (pathRef.current) pathRef.current.setAttribute("d", buildPath(def, staticScale));
       particlesRef.current.forEach((node, index) => {
         if (!node) return;
-        const tailOffset = index / (cfg.particleCount - 1);
-        const p = point(normalizeProgress(0.5 - tailOffset * cfg.trailSpan), 0.76, cfg);
+        const tailOffset = index / (def.particleCount - 1);
+        const p = def.point(normalizeProgress(0.5 - tailOffset * def.trailSpan), staticScale);
         const fade = Math.pow(1 - tailOffset, 0.56);
         node.setAttribute("cx", p.x.toFixed(2));
         node.setAttribute("cy", p.y.toFixed(2));
@@ -91,17 +81,18 @@ export function CurveLoader({ label, size = 220, config, className }: CurveLoade
     const tick = (now: number) => {
       const time = now - startRef.current;
       const phaseOffset = phaseRef.current;
-      const progress = ((time + phaseOffset * cfg.durationMs) % cfg.durationMs) / cfg.durationMs;
-      const detailScale = getDetailScale(time, cfg, phaseOffset);
+      const progress = ((time + phaseOffset * def.durationMs) % def.durationMs) / def.durationMs;
+      const detailScale = getDetailScale(time, def, phaseOffset);
+      const rotation = getRotation(time, def, phaseOffset);
 
-      if (pathRef.current) pathRef.current.setAttribute("d", buildPath(cfg, detailScale));
+      if (groupRef.current) groupRef.current.setAttribute("transform", `rotate(${rotation} 50 50)`);
+      if (pathRef.current) pathRef.current.setAttribute("d", buildPath(def, detailScale));
 
-      const particles = particlesRef.current;
-      for (let index = 0; index < particles.length; index++) {
-        const node = particles[index];
+      for (let index = 0; index < particlesRef.current.length; index++) {
+        const node = particlesRef.current[index];
         if (!node) continue;
-        const tailOffset = index / (cfg.particleCount - 1);
-        const p = point(normalizeProgress(progress - tailOffset * cfg.trailSpan), detailScale, cfg);
+        const tailOffset = index / (def.particleCount - 1);
+        const p = def.point(normalizeProgress(progress - tailOffset * def.trailSpan), detailScale);
         const fade = Math.pow(1 - tailOffset, 0.56);
         node.setAttribute("cx", p.x.toFixed(2));
         node.setAttribute("cy", p.y.toFixed(2));
@@ -112,29 +103,22 @@ export function CurveLoader({ label, size = 220, config, className }: CurveLoade
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [def]);
 
   return (
     <div className={`flex flex-col items-center justify-center gap-5 ${className ?? ""}`} role="status" aria-live="polite">
-      <svg
-        viewBox="0 0 100 100"
-        width={size}
-        height={size}
-        className="text-[var(--accent)]"
-        aria-hidden="true"
-      >
+      <svg viewBox="0 0 100 100" width={size} height={size} className="text-[var(--accent)]" aria-hidden="true">
         <g ref={groupRef}>
           <path
             ref={pathRef}
             fill="none"
             stroke="currentColor"
-            strokeWidth={cfg.strokeWidth}
+            strokeWidth={def.strokeWidth}
             strokeLinecap="round"
             strokeLinejoin="round"
             opacity={0.1}
           />
-          {Array.from({ length: cfg.particleCount }).map((_, i) => (
+          {Array.from({ length: def.particleCount }).map((_, i) => (
             <circle
               key={i}
               ref={(el) => { if (el) particlesRef.current[i] = el; }}
@@ -150,9 +134,18 @@ export function CurveLoader({ label, size = 220, config, className }: CurveLoade
       {label && (
         <div className="text-center">
           <div className="text-sm font-medium text-[var(--text)]">{label}</div>
-          <div className="mt-1 text-xs text-[var(--muted)] mono">Fourier Flow · synthesizing build</div>
+          {!hideVariantTag && (
+            <div className="mt-1 text-xs text-[var(--muted)] mono">{def.name} · {def.tag}</div>
+          )}
         </div>
       )}
     </div>
   );
+}
+
+/** Reads the user's saved loader variant from localStorage. */
+export function BuildCurveLoader(props: Omit<CurveLoaderProps, "variant">) {
+  const { variant, ready } = useLoaderVariant();
+  if (!ready) return <CurveLoader {...props} variant={DEFAULT_LOADER_VARIANT} />;
+  return <CurveLoader {...props} variant={variant} />;
 }
