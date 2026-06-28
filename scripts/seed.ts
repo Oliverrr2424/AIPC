@@ -1,6 +1,6 @@
 // Seed the DB with canonical parts from parts.ts and write an initial
 // price snapshot (using list prices) so the historical chart has a baseline.
-// Run with: DATABASE_URL="file:./dev.db" npx tsx scripts/seed.ts
+// Run after `npm run db:up && npm run db:migrate`.
 
 import { PrismaClient } from "@prisma/client";
 import { parts } from "../src/data/parts";
@@ -8,11 +8,11 @@ import benchmarkSeed from "../src/data/benchmarks.json";
 
 const prisma = new PrismaClient();
 
-function specsJson(part: typeof parts[number]): string {
+function specsJson(part: typeof parts[number]) {
   // Strip top-level catalog fields, keep category-specific spec fields.
-  const { id, category, name, brand, price, currency, imageUrl, productUrl, tags, summary, ...rest } = part;
-  void id; void category; void name; void brand; void price; void currency; void imageUrl; void productUrl; void tags; void summary;
-  return JSON.stringify(rest);
+  const { id, category, name, brand, price, currency, imageUrl, productUrl, specSourceUrl, priceSourceUrl, priceKind, priceAsOf, tags, summary, ...rest } = part;
+  void id; void category; void name; void brand; void price; void currency; void imageUrl; void productUrl; void specSourceUrl; void priceSourceUrl; void priceKind; void priceAsOf; void tags; void summary;
+  return rest;
 }
 
 async function main() {
@@ -28,7 +28,11 @@ async function main() {
         chipset: "chipset" in part ? (part as { chipset?: string }).chipset ?? null : null,
         imageUrl: part.imageUrl ?? null,
         productUrl: part.productUrl ?? null,
-        tags: part.tags.join(","),
+        specSourceUrl: part.specSourceUrl ?? null,
+        priceSourceUrl: part.priceSourceUrl ?? null,
+        priceKind: part.priceKind ?? "reference",
+        priceAsOf: part.priceAsOf ? new Date(part.priceAsOf) : null,
+        tags: part.tags,
         summary: part.summary,
         specsJson: specsJson(part),
         listPriceUsd: part.currency === "USD" ? part.price : part.price,
@@ -36,7 +40,13 @@ async function main() {
       update: {
         name: part.name,
         brand: part.brand,
-        tags: part.tags.join(","),
+        imageUrl: part.imageUrl ?? null,
+        productUrl: part.productUrl ?? null,
+        specSourceUrl: part.specSourceUrl ?? null,
+        priceSourceUrl: part.priceSourceUrl ?? null,
+        priceKind: part.priceKind ?? "reference",
+        priceAsOf: part.priceAsOf ? new Date(part.priceAsOf) : null,
+        tags: part.tags,
         summary: part.summary,
         specsJson: specsJson(part),
         listPriceUsd: part.price,
@@ -48,20 +58,14 @@ async function main() {
   // Write a baseline "list" price snapshot so the chart has a starting point.
   console.log("Writing baseline price snapshots...");
   const now = new Date();
+  let baselineWritten = 0;
   for (const part of parts) {
-    await prisma.priceSnapshot.create({
-      data: {
-        partId: part.id,
-        retailer: "list",
-        region: "US",
-        priceUsd: part.price,
-        currency: "USD",
-        inStock: true,
-        capturedAt: now,
-      },
-    });
+    const exists = await prisma.priceSnapshot.findFirst({ where: { partId: part.id, retailer: "list" } });
+    if (exists) continue;
+    await prisma.priceSnapshot.create({ data: { partId: part.id, retailer: "list", region: "US", priceUsd: part.price, currency: "USD", inStock: true, capturedAt: now } });
+    baselineWritten++;
   }
-  console.log(`✓ ${parts.length} baseline snapshots written`);
+  console.log(`✓ ${baselineWritten} baseline snapshots written`);
 
   // Seed benchmark data.
   console.log("Seeding benchmark data...");

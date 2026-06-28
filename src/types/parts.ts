@@ -1,6 +1,6 @@
 export type PartCategory = "cpu"|"gpu"|"motherboard"|"ram"|"storage"|"cooler"|"psu"|"case";
 export type Currency = "CAD"|"CNY"|"USD";
-export interface BasePart { id:string; category:PartCategory; name:string; brand:string; price:number; currency:Currency; imageUrl?:string; productUrl?:string; tags:string[]; summary:string }
+export interface BasePart { id:string; category:PartCategory; name:string; brand:string; price:number; currency:Currency; imageUrl?:string; productUrl?:string; specSourceUrl?:string; priceSourceUrl?:string; priceKind?:"msrp"|"retail"|"reference"; priceAsOf?:string; tags:string[]; summary:string }
 export interface CpuPart extends BasePart { category:"cpu"; socket:string; cores:number; threads:number; baseClockGHz?:number; boostClockGHz?:number; tdpWatts:number; gamingScore:number; productivityScore:number; tier:"entry"|"mid"|"high"|"enthusiast" }
 export interface GpuPart extends BasePart { category:"gpu"; chipset:string; vramGb:number; tdpWatts:number; lengthMm:number; gamingScore1080p:number; gamingScore1440p:number; gamingScore4k:number; aiScore:number; cuda:boolean }
 export interface MotherboardPart extends BasePart { category:"motherboard"; socket:string; chipset:string; formFactor:"ATX"|"Micro-ATX"|"Mini-ITX"; memoryType:"DDR4"|"DDR5"; maxMemoryGb:number; m2Slots:number; storageInterfaces:("NVMe"|"SATA")[]; cpuTiers:("entry"|"mid"|"high"|"enthusiast")[] }

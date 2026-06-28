@@ -7,7 +7,7 @@ function Inline({ text }: { text: string }) {
 export function AiExplanationPanel({ text }: { text: string }) {
   const lines = text.split("\n");
   return <section className="surface rounded-2xl p-6 sm:p-8">
-    <div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent)]"><Sparkle weight="fill"/></span><div><h2 className="text-xl font-semibold">Build explanation</h2><p className="text-sm text-[var(--muted)]">Generated from structured results</p></div></div>
+    <div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent)]"><Sparkle weight="fill"/></span><div><h2 className="text-xl font-semibold">Build explanation</h2><p className="text-sm text-[var(--muted)]">Summary, trade-offs, and upgrade path</p></div></div>
     <div className="mt-7 max-w-3xl space-y-2 text-sm leading-7 text-[var(--muted)]">
       {lines.map((line, index) => {
         const value = line.trim();

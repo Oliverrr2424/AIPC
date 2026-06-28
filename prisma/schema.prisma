@@ -1,12 +1,13 @@
-// AIPC database schema — Phase 1: price + benchmark data layer.
-// Dev: SQLite (file-based). Production: migrate provider to postgresql.
+// AIPC database schema — PostgreSQL + pgvector.
+// Local development uses the pgvector Docker image; production can use any
+// PostgreSQL provider that supports the vector extension.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -20,9 +21,13 @@ model Part {
   chipset      String?
   imageUrl     String?
   productUrl   String?
-  tags         String
+  specSourceUrl String?
+  priceSourceUrl String?
+  priceKind    String?
+  priceAsOf    DateTime?
+  tags         String[]
   summary      String
-  specsJson    String
+  specsJson    Json
   listPriceUsd Float
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -32,6 +37,32 @@ model Part {
 
   priceSnapshots  PriceSnapshot[]
   benchmarkResults BenchmarkResult[]
+  knowledgeChunks KnowledgeChunk[]
+}
+
+/// A citable knowledge unit used by semantic retrieval. The vector column is
+/// queried through parameterized raw SQL because Prisma represents pgvector as
+/// an Unsupported field.
+model KnowledgeChunk {
+  id             String   @id
+  title          String
+  content        String
+  tags           String[]
+  category       String?
+  partId         String?
+  sourceUrl      String?
+  sourceTitle    String?
+  contentHash    String
+  embeddingModel String?
+  embedding      Unsupported("vector(384)")?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  part Part? @relation(fields: [partId], references: [id], onDelete: SetNull)
+
+  @@index([category])
+  @@index([partId])
+  @@index([contentHash])
 }
 
 /// One row per (part, retailer, timestamp). Append-only — never mutated.

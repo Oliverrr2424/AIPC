@@ -16,6 +16,7 @@ const schema = {
     resolution: { type: "string", enum: ["1080p", "1440p", "4k"] },
     targetFps: { type: "number", enum: [60, 120, 144, 240] }, games: { type: "string" },
     aiWorkloads: { type: "array", items: { type: "string" } }, vramPreference: { type: "number", enum: [12, 16, 24, 32] },
+    ramCapacityGb: { type: "number" }, storageCapacityTb: { type: "number" },
     developerWorkloads: { type: "array", items: { type: "string" } },
     preferredCpuBrand: { type: "string", enum: ["intel", "amd", "none"] },
     preferredGpuBrand: { type: "string", enum: ["nvidia", "amd", "intel", "none"] },
@@ -53,6 +54,8 @@ function heuristic(query: string): ParsedIntent {
   const budget = money ? Number(money[1].replace(/,/g, "")) : 2000;
   const useCase: UseCase = /ai|llm|cuda|stable diffusion|flux|机器学习|人工智能|大模型|模型训练/.test(q) ? "ai" : /剪辑|视频|davinci|premiere/.test(q) ? "video" : /开发|docker|编译|数据库|android|ios/.test(q) ? "development" : /游戏|gaming|fps|4k|1440p|1080p/.test(q) ? "gaming" : "balanced";
   const existingPartIds = parts.filter(part => q.includes(part.name.toLowerCase()) || q.includes(part.id)).map(part => part.id);
+  const ramCapacity = q.match(/(?:at least\s*)?(\d+)\s*gb\s*(?:of\s*)?(?:system\s*)?(?:ram|memory|内存)/i) || q.match(/(?:ram|memory|内存)[^\d]{0,12}(\d+)\s*gb/i);
+  const storageCapacity = q.match(/(?:at least\s*)?(\d+(?:\.\d+)?)\s*tb\s*(?:nvme|ssd|storage|硬盘|固态)?/i) || q.match(/(?:nvme|ssd|storage|硬盘|固态)[^\d]{0,12}(\d+(?:\.\d+)?)\s*tb/i);
   // Currency detection — check USD FIRST so "美元" (which contains the
   // character 元) is not misread as CNY. Order: CAD → USD → CNY → default USD.
   const isCad = /cad|加币|加拿大/.test(q);
@@ -70,6 +73,8 @@ function heuristic(query: string): ParsedIntent {
     preferredColor: /纯白|全白|白色|white/.test(q) ? "white" : /纯黑|全黑|黑色|black/.test(q) ? "black" : "none",
     preferQuiet: /静音|安静|quiet/.test(q), preferRgb: /rgb|灯效/.test(q) && !/不要rgb|无rgb|no rgb/.test(q),
     preferSmallFormFactor: /小机箱|小钢炮|sff|mini.?itx|itx/.test(q), preferUpgradeability: /升级|upgrade/.test(q), preferLowPower: /低功耗|省电|low power|efficient/.test(q), existingPartIds,
+    ramCapacityGb: ramCapacity ? Number(ramCapacity[1]) : undefined,
+    storageCapacityTb: storageCapacity ? Number(storageCapacity[1]) : undefined,
     aiWorkloads: useCase === "ai" ? [q.includes("diffusion") || q.includes("flux") ? "Stable Diffusion / Flux" : "Local LLM inference"] : undefined,
     developerWorkloads: useCase === "development" ? [q.includes("docker") ? "Docker" : "Software development"] : undefined,
     summary: "Parsed locally from budget, workload, resolution, brand, and preference keywords.",
@@ -83,7 +88,10 @@ function normalize(parsed: ParsedIntent, fallback: ParsedIntent): BuildRequest {
     currency: parsed.currency === "CAD" || parsed.currency === "CNY" ? parsed.currency : "USD", country: parsed.country === "Canada" || parsed.country === "China" ? parsed.country : "US",
     useCase: (["gaming", "ai", "development", "video", "balanced"] as const).includes(parsed.useCase as UseCase) ? parsed.useCase as UseCase : "balanced",
     resolution: parsed.resolution, targetFps: parsed.targetFps, games: parsed.games,
-    aiWorkloads: parsed.aiWorkloads, vramPreference: parsed.vramPreference, developerWorkloads: parsed.developerWorkloads,
+    aiWorkloads: parsed.aiWorkloads, vramPreference: parsed.vramPreference,
+    ramCapacityGb: Number(parsed.ramCapacityGb) > 0 ? Number(parsed.ramCapacityGb) : Number(fallback.ramCapacityGb) > 0 ? Number(fallback.ramCapacityGb) : undefined,
+    storageCapacityTb: Number(parsed.storageCapacityTb) > 0 ? Number(parsed.storageCapacityTb) : Number(fallback.storageCapacityTb) > 0 ? Number(fallback.storageCapacityTb) : undefined,
+    developerWorkloads: parsed.developerWorkloads,
     preferredCpuBrand: parsed.preferredCpuBrand ?? fallback.preferredCpuBrand ?? "none",
     preferredGpuBrand: parsed.preferredGpuBrand ?? fallback.preferredGpuBrand ?? "none",
     preferredColor: parsed.preferredColor ?? fallback.preferredColor ?? "none",
@@ -97,7 +105,7 @@ function normalize(parsed: ParsedIntent, fallback: ParsedIntent): BuildRequest {
 export async function parseBuildIntent(query: string, ai: AiGenerationOptions): Promise<IntentParseResult> {
   const fallback = heuristic(query);
   const intentKnowledge = intentKnowledgeRules.map(rule => `- ${rule.title}: ${rule.content}`).join("\n");
-  const prompt = `You are the first stage of a PC recommendation pipeline. Parse the user's natural language into JSON only; never select final hardware. Produce one constraint object for every explicit requirement, preference, exclusion, or target. sourceText must be the exact phrase that supports the constraint. Brand requirements explicitly scoped to CPU or GPU are required constraints. Pure/all-white is required; ordinary color language is preferred. Negative language is excluded. Performance targets such as 4K 240Hz are goals, not guaranteed benchmarks. Currency defaults to USD, uses CAD for Canadian dollars, and CNY for Chinese yuan/RMB. Country defaults to US.\n\nPC intent ontology:\n${intentKnowledge}\n\nExisting part IDs must only be used when the user names one of these known parts:\n${parts.map(p => `${p.id}: ${p.name}`).join("\n")}\n\nUser request:\n${query}`;
+  const prompt = `You are a PC recommendation pipeline. Parse the user's natural language into JSON only; never select final hardware. Produce one constraint object for every explicit requirement, preference, exclusion, or target. sourceText must be the exact phrase that supports the constraint. Brand requirements explicitly scoped to CPU or GPU are required constraints. Pure/all-white is required; ordinary color language is preferred. Negative language is excluded. Performance targets such as 4K 240Hz are goals, not guaranteed benchmarks. Currency defaults to USD, uses CAD for Canadian dollars, and CNY for Chinese yuan/RMB. Country defaults to US.\n\nPC intent ontology:\n${intentKnowledge}\n\nExisting part IDs must only be used when the user names one of these known parts:\n${parts.map(p => `${p.id}: ${p.name}`).join("\n")}\n\nUser request:\n${query}`;
   const parsed = await generateModelJson<ParsedIntent>(prompt, schema, ai);
   const constraints = parsed ? validateLlmConstraints(parsed.constraints) : extractIntentConstraints(query);
   const semanticPatch = semanticRequestPatch(constraints);

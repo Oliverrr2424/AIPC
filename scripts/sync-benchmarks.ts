@@ -2,7 +2,7 @@
 // Re-runnable: skips rows that already exist.
 //
 // Usage:
-//   DATABASE_URL="file:./dev.db" npx tsx scripts/sync-benchmarks.ts
+//   npm run sync:benchmarks
 
 import { syncBenchmarks } from "../src/lib/benchmarks/benchmarkDb";
 

@@ -1,12 +1,6 @@
 "use client";
 import { useEffect, useRef } from "react";
-import {
-  CURVE_VARIANTS,
-  DEFAULT_LOADER_VARIANT,
-  type CurveLoaderVariant,
-  type CurveVariantDefinition,
-} from "@/lib/loaders/curveVariants";
-import { useLoaderVariant } from "@/lib/loaders/useLoaderVariant";
+import { LOADER_VARIANT, type CurveVariantDefinition } from "@/lib/loaders/curveVariants";
 
 function normalizeProgress(v: number): number {
   return v - Math.floor(v);
@@ -35,20 +29,13 @@ function buildPath(def: CurveVariantDefinition, detailScale: number, steps = 480
 export interface CurveLoaderProps {
   label?: string;
   size?: number;
-  variant?: CurveLoaderVariant;
   className?: string;
   /** Hide the variant name subtitle under the label. */
   hideVariantTag?: boolean;
 }
 
-export function CurveLoader({
-  label,
-  size = 220,
-  variant = DEFAULT_LOADER_VARIANT,
-  className,
-  hideVariantTag = false,
-}: CurveLoaderProps) {
-  const def = CURVE_VARIANTS[variant];
+export function CurveLoader({ label, size = 220, className, hideVariantTag = false }: CurveLoaderProps) {
+  const def = LOADER_VARIANT;
   const groupRef = useRef<SVGGElement>(null);
   const pathRef = useRef<SVGPathElement>(null);
   const particlesRef = useRef<SVGCircleElement[]>([]);
@@ -143,9 +130,7 @@ export function CurveLoader({
   );
 }
 
-/** Reads the user's saved loader variant from localStorage. */
+/** Kept for backward compatibility — always renders the Hypotrochoid Loop. */
 export function BuildCurveLoader(props: Omit<CurveLoaderProps, "variant">) {
-  const { variant, ready } = useLoaderVariant();
-  if (!ready) return <CurveLoader {...props} variant={DEFAULT_LOADER_VARIANT} />;
-  return <CurveLoader {...props} variant={variant} />;
+  return <CurveLoader {...props} />;
 }

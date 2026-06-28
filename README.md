@@ -10,15 +10,19 @@ An explainable RAG-augmented PC recommendation system built with Next.js, React,
 - **Public benchmark database** — curated from TechPowerUp / Hardware Unboxed / Blender Open Data / llama.cpp
 - **Real numeric estimates** — FPS (Cyberpunk 2077), token/s (Llama 7B/13B/70B Q4), Blender Classroom render seconds, Cinebench 2024
 - **MCP tool surface** — price / benchmark / compatibility / performance exposed as MCP tools for AI agents
-- **SQLite + Prisma** for dev (migrate to Postgres for prod by changing `DATABASE_URL`)
+- **PostgreSQL + pgvector + Prisma** for durable prices, benchmarks, knowledge chunks, and HNSW semantic retrieval
+- **Real vector RAG** with multilingual E5 embeddings by default, plus an optional Gemini Embedding 2 backend
 
 ## Run locally
 
 ```bash
 npm install
 cp .env.example .env.local          # fill in BESTBUY_API_KEY for live US prices (optional)
-npm run db:push                     # create the SQLite schema
-npm run db:seed                     # seed 52 parts + baseline prices + 69 benchmark rows
+npm run db:up                       # start local PostgreSQL + pgvector
+npm run db:migrate                  # create schema and HNSW vector index
+npm run db:seed                     # seed 54 parts + baseline prices + 69 benchmark rows
+npm run db:import-sqlite             # one-time import of legacy price history (optional)
+npm run rag:index                   # embed and index knowledge chunks
 npm run sync:prices                 # pull live prices from configured providers
 npm run sync:benchmarks             # load curated benchmark data into DB
 npm run dev
@@ -28,19 +32,31 @@ Open `http://localhost:3000/build/chat` for the natural-language RAG builder, or
 - **BenchmarkPanel** — concrete FPS, token/s, render seconds with source attribution
 - **PriceChart** — 30-day price history for the selected GPU
 
+## Draft-first multi-turn agent
+
+`/build/chat` creates a visible baseline immediately, then accepts short follow-ups such as `换成 5090`, `不要水冷`, `更白一点`, `便宜一点`, or `为什么不用 14900K`.
+
+- **Patch** locks every unaffected category. Compatibility may add a narrowly scoped linked change (for example, a higher-wattage PSU after a GPU upgrade).
+- **Optimize** keeps explicit part locks and changes at most three components to lower cost.
+- **Explain** never mutates the build.
+- **Rebuild** runs only for an explicit overall rejection, a new total budget, or language such as `太贵了` / `重新配`.
+
+Common edits use deterministic routing without an LLM call. Ambiguous turns use compact structured messages. DeepSeek conversations append prior `user` and `assistant` messages as documented in [Multi-round Conversation](https://api-docs.deepseek.com/guides/multi_round_chat); stable prefixes allow DeepSeek's default [Context Caching](https://api-docs.deepseek.com/guides/kv_cache) to apply. Cache hit/miss token counts are returned in `interaction.tokenUsage` and shown in the chat UI.
+
 ## Architecture
 
 ```mermaid
 flowchart TB
   subgraph Data["Data layer (Phase 1)"]
-    DB[(SQLite / Prisma)]
+    DB[(PostgreSQL / pgvector / Prisma)]
+    Embed["Multilingual E5 or Gemini\n384-dimensional embeddings"]
     Prices["Price providers\nBestBuy · PCPartPicker · List"]
     Bench["Benchmark DB\nTechPowerUp · Blender · llama.cpp"]
     Cron["Vercel Cron\n06:00 & 18:00 UTC"]
   end
   subgraph Engine["Recommendation engine"]
     Intent["intentParser"]
-    Retrieve["candidateRetriever"]
+    Retrieve["pgvector cosine retrieval\n+ tag/category filters"]
     Build["buildGenerator + compatChecker"]
     Perf["performanceEstimator\n→ real FPS / tok/s / s"]
   end
@@ -51,6 +67,7 @@ flowchart TB
     Tools["7 tools\nprice · compat · perf · sync"]
   end
   Cron -->|GET /api/sync| Prices --> DB
+  Intent --> Embed --> DB
   Cron --> Bench --> DB
   Bench --> Perf
   DB --> Perf
@@ -62,7 +79,7 @@ flowchart TB
 ### Deterministic-first principle
 
 1. The selected DeepSeek V4 or Gemini model parses natural language into a structured `BuildRequest`, with a deterministic local fallback.
-2. A replaceable retrieval layer searches local `KnowledgeChunk` seed data by keyword, category, and tags. Its interface can later be backed by pgvector.
+2. The retrieval layer embeds each category-specific query, runs cosine similarity against a pgvector HNSW index, and applies tag/category filters. A visibly labeled keyword fallback is used only when semantic retrieval is unavailable.
 3. The candidate retriever builds a scored part pool for each category using performance, value, RAG relevance, preferences, and upgradeability.
 4. The recommendation engine selects only from those pools. Gemini never invents the final hardware list.
 5. Deterministic rules validate socket, memory type, PSU headroom, clearances, cooler height, and motherboard form factor.
@@ -75,7 +92,11 @@ Copy `.env.example` to `.env.local`:
 
 | Variable | Purpose | Required |
 |----------|---------|----------|
-| `DATABASE_URL` | Prisma datasource. Use `file:./dev.db` for SQLite. | yes |
+| `DATABASE_URL` | PostgreSQL connection string. The example matches `docker-compose.yml`. | yes |
+| `EMBEDDING_PROVIDER` | `local` (multilingual E5) or `gemini`. Changing provider requires re-indexing. | yes |
+| `LOCAL_EMBEDDING_MODEL` | Transformers.js embedding model, default `Xenova/multilingual-e5-small`. | local RAG |
+| `HF_ENDPOINT` | Hugging Face model host used for the initial local model download. | no |
+| `EMBEDDING_MODEL` | Gemini embedding model when provider is `gemini`. | Gemini RAG |
 | `BESTBUY_API_KEY` | BestBuy official Products API (US prices). Without it, falls back to PCPartPicker + list prices. | no |
 | `DEEPSEEK_API_KEY` | DeepSeek V4 for intent parsing + explanation. | no |
 | `GEMINI_API_KEY` | Gemini 2.5 Flash as alternate AI provider. | no |
@@ -108,10 +129,15 @@ Or register it in `.cursor/mcp.json` (already scaffolded) to use the tools insid
 ```bash
 npm run typecheck
 npm run build
+npm run db:up              # local PostgreSQL + pgvector
+npm run db:migrate         # apply versioned schema migrations
 npm run db:seed            # seed parts + baseline prices + benchmarks
+npm run db:import-sqlite   # idempotent import of legacy SQLite prices/sync logs
+npm run rag:index          # embed knowledge chunks into pgvector
+npm run rag:eval           # semantic retrieval regression set
 npm run sync:prices        # live price refresh
 npm run sync:benchmarks    # load curated benchmark data
-npm run sync:all           # seed + prices + benchmarks
+npm run sync:all           # seed + RAG index + prices + benchmarks
 ```
 
 ## Data sources
@@ -129,9 +155,19 @@ Prices from live providers are USD. The UI converts to the requested currency us
 
 ## Roadmap (post-Phase 1)
 
-- **Phase 2** — multi-turn conversational build edits; RAG flow share links
+- **Phase 2** — expand sourced knowledge ingestion, retrieval evaluation, and RAG flow share links
 - **Phase 3** — multi-agent orchestration (budget / compatibility / performance / price specialists)
-- **Phase 4** — pgvector knowledge retrieval; expand part catalog to thousands
+- **Phase 4** — expand the part catalog to thousands and add hybrid reranking
 - **Phase 5** — affiliate product URLs + one-click cart
 
 Prices from live providers are real-time snapshots, not live listings. Historical accuracy depends on cron run frequency.
+
+### Multi-turn request shape
+
+The first call sends `{ query, model, thinking }`. Follow-ups send the latest recommendation as `currentBuild`:
+
+```json
+{ "query": "换成 5090", "currentBuild": { "...": "previous response" }, "model": "deepseek-v4-flash", "thinking": "disabled" }
+```
+
+The response remains a `RagBuildRecommendation` and adds `interaction.action`, `changedParts`, `preservedCategories`, the bounded model context, and optional cache/token usage.

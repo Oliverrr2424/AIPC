@@ -9,6 +9,8 @@ export interface KnowledgeChunk {
   tags: string[];
   category?: PartCategory | "workload" | "compatibility" | "planning" | "intent";
   partId?: string;
+  sourceUrl?: string;
+  sourceTitle?: string;
 }
 
 export interface RetrievalOptions {
@@ -20,6 +22,19 @@ export interface RetrievalOptions {
 export interface RetrievedKnowledgeChunk extends KnowledgeChunk {
   relevanceScore: number;
   matchedTerms: string[];
+  retrievalMode: "vector" | "keyword" | "keyword-fallback";
+  similarityScore?: number;
+  embeddingModel?: string;
+  embeddingProvider?: "local" | "gemini" | "ollama";
+  retrievalNote?: string;
+}
+
+export interface RetrievalSummary {
+  mode: "vector" | "keyword" | "keyword-fallback";
+  embeddingModel?: string;
+  embeddingProvider?: "local" | "gemini" | "ollama";
+  vectorChunkCount: number;
+  fallbackReason?: string;
 }
 
 export interface CandidateScore {
@@ -62,6 +77,40 @@ export interface RagBuildRecommendation extends BuildRecommendation {
   retrievedChunks: RetrievedKnowledgeChunk[];
   reasoning: RagReasoningItem[];
   alternativeBuilds: AlternativeBuildSummary[];
+  retrieval: RetrievalSummary;
+  interaction?: AgentInteraction;
+}
+
+export type BuildTurnAction = "draft" | "patch" | "optimize" | "rebuild" | "explain";
+
+export interface AgentContextMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface BuildPartChange {
+  category: PartCategory;
+  from: string;
+  to: string;
+  reason: string;
+  inducedByCompatibility: boolean;
+}
+
+export interface AgentTokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
+}
+
+export interface AgentInteraction {
+  action: BuildTurnAction;
+  message: string;
+  changedParts: BuildPartChange[];
+  preservedCategories: PartCategory[];
+  affectedCategories: PartCategory[];
+  context: AgentContextMessage[];
+  tokenUsage?: AgentTokenUsage;
 }
 
 export interface IntentParseResult {

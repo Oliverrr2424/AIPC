@@ -3,8 +3,8 @@ import { allocations } from "@/lib/recommendation/budgetAllocation";
 import { priceIn } from "@/lib/pricing/priceEstimator";
 import type { BuildRequest, UseCase } from "@/types/build";
 import type { Part, PartCategory } from "@/types/parts";
-import type { CandidatePools, CandidateScore, PartCandidate, RetrievedKnowledgeChunk } from "@/types/knowledge";
-import { retrieveKnowledgeChunks } from "./retrieval";
+import type { CandidatePools, CandidateScore, PartCandidate, RetrievalSummary, RetrievedKnowledgeChunk } from "@/types/knowledge";
+import { retrieveKnowledgeChunks, summarizeRetrieval } from "./retrieval";
 
 const categories: PartCategory[] = ["cpu", "gpu", "motherboard", "ram", "storage", "cooler", "psu", "case"];
 const weights: Record<UseCase, Omit<CandidateScore, "totalScore">> = {
@@ -51,7 +51,7 @@ function preference(part: Part, request: BuildRequest) {
   if (request.preferRgb && part.tags.includes("rgb")) score += 25;
   if (request.preferredCooling === "aio" && part.category === "cooler" && part.type === "aio") score += 35;
   if (request.preferredCaseStyle === "panoramic" && part.category === "case" && part.tags.includes("panoramic")) score += 35;
-  if (request.preferSmallFormFactor) score += (part.category === "case" && part.id === "case-nr200") || (part.category === "motherboard" && part.formFactor === "Mini-ITX") || (part.category === "psu" && part.formFactor === "SFX") ? 45 : part.category === "case" || part.category === "motherboard" || part.category === "psu" ? -40 : 0;
+  if (request.preferSmallFormFactor) score += (part.category === "case" && part.supportedMotherboardFormFactors.length === 1 && part.supportedMotherboardFormFactors[0] === "Mini-ITX") || (part.category === "motherboard" && part.formFactor === "Mini-ITX") || (part.category === "psu" && part.formFactor === "SFX") ? 45 : part.category === "case" || part.category === "motherboard" || part.category === "psu" ? -40 : 0;
   if (request.preferQuiet && part.tags.includes("quiet")) score += 25;
   if (request.preferLowPower && ((part.category === "cpu" && part.tdpWatts <= 65) || (part.category === "gpu" && part.tdpWatts <= 220))) score += 30;
   return Math.max(0, Math.min(100, score));
@@ -79,8 +79,9 @@ function scorePart(part: Part, request: BuildRequest, evidence: RetrievedKnowled
   return { performanceScore, valueScore, ragRelevanceScore, preferenceScore, upgradeabilityScore, totalScore };
 }
 
-export async function retrieveCandidatePools(request: BuildRequest, _sourceQuery = ""): Promise<{ pools: CandidatePools; chunks: RetrievedKnowledgeChunk[] }> {
-  const queryResults = await Promise.all(buildRetrievalQueries(request).map(({ category, query }) => retrieveKnowledgeChunks(query, { tags: [category, request.useCase, request.resolution || ""].filter(Boolean), limit: 8 })));
+export async function retrieveCandidatePools(request: BuildRequest, _sourceQuery = "", retrievalCategories: PartCategory[] = categories): Promise<{ pools: CandidatePools; chunks: RetrievedKnowledgeChunk[]; retrieval: RetrievalSummary }> {
+  const requested = new Set(retrievalCategories);
+  const queryResults = await Promise.all(buildRetrievalQueries(request).filter(({ category }) => requested.has(category)).map(({ category, query }) => retrieveKnowledgeChunks(query, { tags: [category, request.useCase, request.resolution || ""].filter(Boolean), limit: 8 })));
   const unique = new Map<string, RetrievedKnowledgeChunk>();
   queryResults.flat().forEach(chunk => { const prior = unique.get(chunk.id); if (!prior || prior.relevanceScore < chunk.relevanceScore) unique.set(chunk.id, chunk); });
   const chunks = [...unique.values()].filter(chunk => {
@@ -101,6 +102,13 @@ export async function retrieveCandidatePools(request: BuildRequest, _sourceQuery
     let eligible = parts.filter(part => part.category === category);
     if (category === "cpu" && request.preferredCpuBrand && request.preferredCpuBrand !== "none") eligible = eligible.filter(part => part.brand.toLowerCase() === request.preferredCpuBrand);
     if (category === "gpu" && request.preferredGpuBrand && request.preferredGpuBrand !== "none") eligible = eligible.filter(part => part.brand.toLowerCase() === request.preferredGpuBrand);
+    const explicitVramMinimum = request.constraints?.some(item => item.target === "workloadTarget" && item.strength === "required" && /vram|显存/i.test(`${item.value} ${item.sourceText}`));
+    if (category === "gpu" && request.vramPreference && explicitVramMinimum) eligible = eligible.filter(part => part.category === "gpu" && part.vramGb >= request.vramPreference!);
+    if (category === "ram" && request.ramCapacityGb) eligible = eligible.filter(part => part.category === "ram" && part.capacityGb >= request.ramCapacityGb!);
+    if (category === "storage" && request.storageCapacityTb) eligible = eligible.filter(part => part.category === "storage" && part.capacityTb >= request.storageCapacityTb!);
+    const exactPartId = request.constraints?.find(item => item.target === "workloadTarget" && item.strength === "required" && item.value.startsWith("part:") && parts.find(part => part.id === item.value.slice(5))?.category === category)?.value.slice(5);
+    if (exactPartId) eligible = eligible.filter(part => part.id === exactPartId);
+    if (category === "cooler" && request.preferredCooling && request.preferredCooling !== "none") eligible = eligible.filter(part => part.category === "cooler" && part.type === request.preferredCooling);
     const colorIsRequired = request.constraints?.some(item => item.target === "color" && item.value === request.preferredColor && item.strength === "required");
     if (colorIsRequired && request.preferredColor && request.preferredColor !== "none") {
       const colorMatches = eligible.filter(part => part.tags.includes(request.preferredColor as string));
@@ -111,12 +119,11 @@ export async function retrieveCandidatePools(request: BuildRequest, _sourceQuery
       const nonRgbMatches = eligible.filter(part => !part.tags.includes("rgb"));
       if (nonRgbMatches.length) eligible = nonRgbMatches;
     }
-    if (category === "cooler" && request.preferredCooling === "air") eligible = eligible.filter(part => part.category === "cooler" && part.type === "air");
     const candidates: PartCandidate[] = eligible.map(part => {
       const evidence = chunks.filter(chunk => chunk.partId === part.id || (!chunk.partId && (chunk.category === category || chunk.tags.includes(category))));
       return { part, evidence: evidence.slice(0,3), score: scorePart(part, request, evidence) };
-    }).sort((a,b) => b.score.totalScore-a.score.totalScore).slice(0, 6);
+    }).sort((a,b) => b.score.totalScore-a.score.totalScore).slice(0, category === "psu" ? 12 : 6);
     return [category, candidates];
   })) as CandidatePools;
-  return { pools, chunks };
+  return { pools, chunks, retrieval: summarizeRetrieval(chunks) };
 }

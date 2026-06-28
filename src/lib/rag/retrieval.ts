@@ -1,5 +1,6 @@
 import rawKnowledge from "@/data/knowledge.json";
-import type { KnowledgeChunk, RetrievalOptions, RetrievedKnowledgeChunk } from "@/types/knowledge";
+import type { KnowledgeChunk, RetrievalOptions, RetrievalSummary, RetrievedKnowledgeChunk } from "@/types/knowledge";
+import { PgVectorKnowledgeRetriever, semanticRetrievalConfigured } from "./pgvectorRetriever";
 
 export interface KnowledgeRetriever {
   retrieve(query: string, options?: RetrievalOptions): Promise<RetrievedKnowledgeChunk[]>;
@@ -30,7 +31,9 @@ function termsFor(query: string) {
 }
 
 export class KeywordKnowledgeRetriever implements KnowledgeRetriever {
-  async retrieve(query: string, options: RetrievalOptions = {}) {
+  constructor(private readonly mode: "keyword" | "keyword-fallback" = "keyword") {}
+
+  async retrieve(query: string, options: RetrievalOptions = {}, retrievalNote?: string): Promise<RetrievedKnowledgeChunk[]> {
     const terms = termsFor(query);
     const requestedTags = (options.tags || []).map(t => t.toLowerCase());
     return knowledgeChunks
@@ -42,7 +45,7 @@ export class KeywordKnowledgeRetriever implements KnowledgeRetriever {
         const tagHits = matchedTerms.filter(term => chunk.tags.some(tag => tag.includes(term) || term.includes(tag))).length;
         const titleHits = matchedTerms.filter(term => title.includes(term)).length;
         const relevanceScore = Math.min(100, matchedTerms.length * 13 + tagHits * 10 + titleHits * 7 + (chunk.partId ? 4 : 0));
-        return { ...chunk, relevanceScore, matchedTerms };
+        return { ...chunk, relevanceScore, matchedTerms, retrievalMode: this.mode, retrievalNote };
       })
       .filter(chunk => chunk.relevanceScore > 0)
       .sort((a, b) => b.relevanceScore - a.relevanceScore)
@@ -50,8 +53,34 @@ export class KeywordKnowledgeRetriever implements KnowledgeRetriever {
   }
 }
 
-const retriever: KnowledgeRetriever = new KeywordKnowledgeRetriever();
+const keywordRetriever = new KeywordKnowledgeRetriever("keyword");
+const fallbackRetriever = new KeywordKnowledgeRetriever("keyword-fallback");
+const vectorRetriever = new PgVectorKnowledgeRetriever();
 
-export function retrieveKnowledgeChunks(query: string, options?: RetrievalOptions) {
-  return retriever.retrieve(query, options);
+export async function retrieveKnowledgeChunks(query: string, options?: RetrievalOptions): Promise<RetrievedKnowledgeChunk[]> {
+  const requestedMode = process.env.RAG_RETRIEVAL_MODE?.toLowerCase();
+  if (requestedMode === "keyword") return keywordRetriever.retrieve(query, options);
+  if (!semanticRetrievalConfigured()) {
+    return fallbackRetriever.retrieve(query, options, "PostgreSQL vector store or Gemini embeddings are not configured.");
+  }
+  try {
+    return await vectorRetriever.retrieve(query, options);
+  } catch (error) {
+    const note = error instanceof Error ? error.message : "Semantic retrieval failed.";
+    console.warn(`[rag] vector retrieval degraded to keyword: ${note}`);
+    return fallbackRetriever.retrieve(query, options, note);
+  }
+}
+
+export function summarizeRetrieval(chunks: RetrievedKnowledgeChunk[]): RetrievalSummary {
+  const vectorChunks = chunks.filter(chunk => chunk.retrievalMode === "vector");
+  const fallback = chunks.find(chunk => chunk.retrievalMode === "keyword-fallback");
+  const keyword = chunks.find(chunk => chunk.retrievalMode === "keyword");
+  return {
+    mode: vectorChunks.length ? "vector" : fallback ? "keyword-fallback" : "keyword",
+    embeddingModel: vectorChunks.find(chunk => chunk.embeddingModel)?.embeddingModel,
+    embeddingProvider: vectorChunks.find(chunk => chunk.embeddingProvider)?.embeddingProvider,
+    vectorChunkCount: vectorChunks.length,
+    fallbackReason: fallback?.retrievalNote || (!vectorChunks.length && !keyword ? "No retrievable knowledge chunks were found." : undefined),
+  };
 }

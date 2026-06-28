@@ -3,8 +3,8 @@
 // and logs a SyncRun. Idempotent: each run only appends new snapshots.
 //
 // Usage:
-//   DATABASE_URL="file:./dev.db" npx tsx scripts/sync-prices.ts
-//   DATABASE_URL="file:./dev.db" npx tsx scripts/sync-prices.ts --provider=bestbuy
+//   npm run sync:prices
+//   npm run sync:prices -- --provider=bestbuy
 
 import { syncPrices } from "../src/lib/pricing/syncPrices";
 

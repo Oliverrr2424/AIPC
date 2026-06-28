@@ -20,7 +20,7 @@ export async function generateBuild(request:BuildRequest):Promise<BuildRecommend
  const ramNeed=request.useCase==="ai"||request.useCase==="development"||request.useCase==="video"?64:32;
  const ram=existing<typeof rams[number]>(request,"ram")||inBudget(rams,budget*a.ram,c,x=>Math.min(x.capacityGb,ramNeed)*2+x.speedMt/500-(x.capacityGb>ramNeed*2?30:0));
  const storage=existing<typeof storages[number]>(request,"storage")||inBudget(storages,budget*a.storage,c,x=>x.capacityTb*25+(x.readSpeedMb||0)/500);
- const casePool=cases.filter(x=>x.supportedMotherboardFormFactors.includes(motherboard.formFactor)&&x.maxGpuLengthMm>=gpu.lengthMm&&(request.preferSmallFormFactor?x.id==="case-nr200":x.id!=="case-nr200"));
+ const casePool=cases.filter(x=>x.supportedMotherboardFormFactors.includes(motherboard.formFactor)&&x.maxGpuLengthMm>=gpu.lengthMm&&(request.preferSmallFormFactor?x.supportedMotherboardFormFactors.length===1&&x.supportedMotherboardFormFactors[0]==="Mini-ITX":x.supportedMotherboardFormFactors.length>1));
  const pcCase=existing<typeof cases[number]>(request,"case")||inBudget(casePool.length?casePool:cases,budget*a.case,c,x=>x.maxGpuLengthMm/20+x.maxCoolerHeightMm/20);
  const coolerPool=coolers.filter(x=>x.supportedSockets.includes(cpu.socket)&&x.tdpRatingWatts>=cpu.tdpWatts&&(x.type==="aio"||!x.heightMm||x.heightMm<=pcCase.maxCoolerHeightMm));
  const cooler=existing<typeof coolers[number]>(request,"cooler")||inBudget(coolerPool.length?coolerPool:coolers,budget*a.cooler,c,x=>x.tdpRatingWatts/5+(request.preferQuiet&&x.type==="air"?16:0));

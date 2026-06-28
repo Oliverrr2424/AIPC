@@ -1,0 +1,24 @@
+{"kind":"workbook","id":"wb/183gag","sheets":7}
+{"kind":"sheet","id":"ws/f0wzlw","name":"Executive Summary","index":0,"range":"A1:I21","address":"A1:I21","formulas":6}
+{"kind":"formula","sheet":"Executive Summary","address":"B5","formula":"=COUNTIF('Test Results'!$AB$6:$AB$15,\"PASS\")"}
+{"kind":"formula","sheet":"Executive Summary","address":"D5","formula":"=COUNTIF('Test Results'!$AB$6:$AB$15,\"WARNING\")"}
+{"kind":"formula","sheet":"Executive Summary","address":"F5","formula":"=COUNTIF('Test Results'!$AB$6:$AB$15,\"FAIL\")"}
+{"kind":"formula","sheet":"Executive Summary","address":"B6","formula":"=AVERAGE('Test Results'!$L$6:$L$15)"}
+{"kind":"formula","sheet":"Executive Summary","address":"D6","formula":"=COUNTIFS('Test Results'!$I$6:$I$15,\"vector\",'Test Results'!$J$6:$J$15,\"ollama\")/COUNTA('Test Results'!$A$6:$A$15)"}
+{"kind":"formula","sheet":"Executive Summary","address":"F6","formula":"=COUNTIF('Test Results'!$AA$6:$AA$15,\"*FAIL*\")"}
+{"kind":"sheet","id":"ws/5ajx24","name":"Test Results","index":1,"range":"A1:AF15","address":"A1:AF15","formulas":10}
+{"kind":"formula","sheet":"Test Results","address":"P6","formula":"=IFERROR(O6/M6,0)"}
+{"kind":"formula","sheet":"Test Results","address":"P7","formula":"=IFERROR(O7/M7,0)"}
+{"kind":"formula","sheet":"Test Results","address":"P8","formula":"=IFERROR(O8/M8,0)"}
+{"kind":"formula","sheet":"Test Results","address":"P9","formula":"=IFERROR(O9/M9,0)"}
+{"kind":"formula","sheet":"Test Results","address":"P10","formula":"=IFERROR(O10/M10,0)"}
+{"kind":"formula","sheet":"Test Results","address":"P11","formula":"=IFERROR(O11/M11,0)"}
+{"kind":"formula","sheet":"Test Results","address":"P12","formula":"=IFERROR(O12/M12,0)"}
+{"kind":"formula","sheet":"Test Results","address":"P13","formula":"=IFERROR(O13/M13,0)"}
+{"kind":"formula","sheet":"Test Results","address":"P14","formula":"=IFERROR(O14/M14,0)"}
+{"kind":"formula","sheet":"Test Results","address":"P15","formula":"=IFERROR(O15/M15,0)"}
+{"kind":"sheet","id":"ws/o630lj","name":"Before vs After","index":2,"range":"A1:K15","address":"A1:K15"}
+{"kind":"sheet","id":"ws/blsu9v","name":"Full Responses","index":3,"range":"A1:H15","address":"A1:H15"}
+{"kind":"sheet","id":"ws/p7w3rk","name":"Evidence Audit","index":4,"range":"A1:N176","address":"A1:N176"}
+{"kind":"sheet","id":"ws/agqfi9","name":"Parts Catalog","index":5,"range":"A1:M96","address":"A1:M96"}
+{"kind":"sheet","id":"ws/ncwqdt","name":"Sources & Method","index":6,"range":"A1:F57","address":"A1:F57"}

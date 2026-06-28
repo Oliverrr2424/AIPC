@@ -3,8 +3,9 @@ import { checkCompatibility, estimateWattage } from "@/lib/compatibility/compati
 import { estimatePerformance } from "@/lib/performance/performanceEstimator";
 import { priceIn } from "@/lib/pricing/priceEstimator";
 import type { AiGenerationOptions } from "@/types/ai";
+import type { BuildRequest } from "@/types/build";
 import type { BuildParts, Currency, Part, PartCategory } from "@/types/parts";
-import type { AlternativeBuildSummary, PartCandidate, RagBuildRecommendation, RagReasoningItem } from "@/types/knowledge";
+import type { AlternativeBuildSummary, IntentParseResult, PartCandidate, RagBuildRecommendation, RagReasoningItem } from "@/types/knowledge";
 import { retrieveCandidatePools } from "./candidateRetriever";
 import { parseBuildIntent } from "./intentParser";
 import { generateRagExplanation } from "./ragExplanation";
@@ -16,7 +17,7 @@ const first = <T extends Part>(candidates: PartCandidate[], predicate: (part: T)
 function optimizeToBudget(initial: BuildParts, pools: Awaited<ReturnType<typeof retrieveCandidatePools>>["pools"], request: RagBuildRecommendation["request"]) {
   const owned = new Set(request.existingPartIds || []);
   const total = (build: BuildParts) => Object.values(build).reduce((sum, part) => sum + (owned.has(part.id) ? 0 : priceIn(part, request.currency)), 0);
-  const adjustable: PartCategory[] = ["gpu", "ram", "storage", "cooler", "case", "psu"];
+  const adjustable: PartCategory[] = ["gpu", "cpu", "motherboard", "ram", "storage", "cooler", "case", "psu"];
   let build = initial;
 
   while (total(build) > request.budget) {
@@ -51,16 +52,21 @@ function makeAlternatives(parts: BuildParts, pools: Awaited<ReturnType<typeof re
   return alternatives.slice(0, 3);
 }
 
-export async function generateRagBuild(sourceQuery: string, ai: AiGenerationOptions): Promise<RagBuildRecommendation> {
-  const intent = await parseBuildIntent(sourceQuery, ai), request = intent.request;
-  const { pools, chunks } = await retrieveCandidatePools(request, sourceQuery);
+export async function generateRagBuildFromRequest(sourceQuery: string, ai: AiGenerationOptions, request: BuildRequest, parserMode: IntentParseResult["mode"]): Promise<RagBuildRecommendation> {
+  const { pools, chunks, retrieval } = await retrieveCandidatePools(request, sourceQuery);
   const gpu = existing<BuildParts["gpu"]>(request.existingPartIds, "gpu") || first<BuildParts["gpu"]>(pools.gpu)!;
   const cpu = existing<BuildParts["cpu"]>(request.existingPartIds, "cpu") || first<BuildParts["cpu"]>(pools.cpu)!;
   const motherboard = existing<BuildParts["motherboard"]>(request.existingPartIds, "motherboard") || first<BuildParts["motherboard"]>(pools.motherboard, part => part.socket === cpu.socket && (!request.preferSmallFormFactor || part.formFactor === "Mini-ITX")) || first<BuildParts["motherboard"]>(pools.motherboard, part => part.socket === cpu.socket)!;
   const ram = existing<BuildParts["ram"]>(request.existingPartIds, "ram") || first<BuildParts["ram"]>(pools.ram, part => part.memoryType === motherboard.memoryType)!;
   const storage = existing<BuildParts["storage"]>(request.existingPartIds, "storage") || first<BuildParts["storage"]>(pools.storage, part => motherboard.storageInterfaces.includes(part.interface))!;
-  const pcCase = existing<BuildParts["case"]>(request.existingPartIds, "case") || first<BuildParts["case"]>(pools.case, part => part.supportedMotherboardFormFactors.includes(motherboard.formFactor) && part.maxGpuLengthMm >= gpu.lengthMm && (!request.preferSmallFormFactor || part.id === "case-nr200")) || first<BuildParts["case"]>(pools.case, part => part.supportedMotherboardFormFactors.includes(motherboard.formFactor) && part.maxGpuLengthMm >= gpu.lengthMm)!;
-  const cooler = existing<BuildParts["cooler"]>(request.existingPartIds, "cooler") || first<BuildParts["cooler"]>(pools.cooler, part => part.supportedSockets.includes(cpu.socket) && part.tdpRatingWatts >= cpu.tdpWatts && (part.type === "aio" || !part.heightMm || part.heightMm <= pcCase.maxCoolerHeightMm))!;
+  const ownedCase = existing<BuildParts["case"]>(request.existingPartIds, "case");
+  let pcCase = ownedCase || first<BuildParts["case"]>(pools.case, part => part.supportedMotherboardFormFactors.includes(motherboard.formFactor) && part.maxGpuLengthMm >= gpu.lengthMm && (!request.preferSmallFormFactor || (part.supportedMotherboardFormFactors.length === 1 && part.supportedMotherboardFormFactors[0] === "Mini-ITX"))) || first<BuildParts["case"]>(pools.case, part => part.supportedMotherboardFormFactors.includes(motherboard.formFactor) && part.maxGpuLengthMm >= gpu.lengthMm)!;
+  let cooler = existing<BuildParts["cooler"]>(request.existingPartIds, "cooler") || first<BuildParts["cooler"]>(pools.cooler, part => part.supportedSockets.includes(cpu.socket) && part.tdpRatingWatts >= cpu.tdpWatts && (part.type === "aio" || !part.heightMm || part.heightMm <= pcCase.maxCoolerHeightMm));
+  if (!cooler) {
+    cooler = first<BuildParts["cooler"]>(pools.cooler, part => part.supportedSockets.includes(cpu.socket) && part.tdpRatingWatts >= cpu.tdpWatts);
+    if (cooler && !ownedCase) pcCase = first<BuildParts["case"]>(pools.case, part => part.supportedMotherboardFormFactors.includes(motherboard.formFactor) && part.maxGpuLengthMm >= gpu.lengthMm && (cooler!.type === "aio" || !cooler!.heightMm || cooler!.heightMm <= part.maxCoolerHeightMm)) || pcCase;
+  }
+  if (!cooler) throw new Error(`No compatible ${request.preferredCooling === "air" ? "air " : ""}cooler is available for ${cpu.name}.`);
   const provisional = { cpu, gpu, motherboard, ram, storage, cooler, case: pcCase };
   const load = Math.round(cpu.tdpWatts + gpu.tdpWatts + 85 + (ram.capacityGb / 8) * 3 + storage.capacityTb * 5), minimumPsu = Math.ceil(load * 1.35 / 50) * 50;
   const psu = existing<BuildParts["psu"]>(request.existingPartIds, "psu") || first<BuildParts["psu"]>(pools.psu, part => part.wattage >= minimumPsu && pcCase.psuFormFactors.includes(part.formFactor)) || first<BuildParts["psu"]>(pools.psu, part => pcCase.psuFormFactors.includes(part.formFactor))!;
@@ -75,6 +81,29 @@ export async function generateRagBuild(sourceQuery: string, ai: AiGenerationOpti
     return { category, considered: pools[category].slice(0, 4).map(item => item.part.name), selected: part.name, reason: `${hardConstraint}Weighted score ${candidate?.score.totalScore.toFixed(1) || "existing"}. ${strongest ? strongest.title : "Selected from structured specifications and deterministic constraints."}`, evidenceIds: candidate?.evidence.map(item => item.id) || [] };
   });
   const title = request.useCase === "ai" ? "RAG Local AI Workstation" : request.useCase === "gaming" ? `RAG ${request.resolution === "4k" ? "4K" : request.resolution || "1440p"} Gaming Build` : request.useCase === "development" ? "RAG Developer Workstation" : request.useCase === "video" ? "RAG Creator Workstation" : "RAG Balanced Build";
-  const raw = { id: `rag-${Date.now().toString(36)}`, title, request, parts, totalPrice, estimatedWattage, compatibility, performance, alternatives: [], generatedAt: new Date().toISOString(), parserMode: intent.mode, aiModel: ai.model, thinkingMode: ai.thinking, sourceQuery, retrievedChunks: chunks, reasoning, alternativeBuilds: makeAlternatives(parts, pools, request.currency) };
+  const baselineSummary = JSON.stringify({
+    budget: `${request.currency} ${request.budget}`,
+    useCase: request.useCase,
+    parts: Object.fromEntries(selected.map(([category, part]) => [category, part.id])),
+  });
+  const raw = {
+    id: `rag-${Date.now().toString(36)}`, title, request, parts, totalPrice, estimatedWattage, compatibility, performance, alternatives: [], generatedAt: new Date().toISOString(), parserMode, aiModel: ai.model, thinkingMode: ai.thinking, sourceQuery, retrievedChunks: chunks, retrieval, reasoning, alternativeBuilds: makeAlternatives(parts, pools, request.currency),
+    interaction: {
+      action: "draft" as const,
+      message: "Baseline build created. Tell me what you want to change; unchanged parts will stay locked unless compatibility requires a linked adjustment.",
+      changedParts: [],
+      preservedCategories: [] as PartCategory[],
+      affectedCategories: selected.map(([category]) => category),
+      context: [
+        { role: "user" as const, content: sourceQuery },
+        { role: "assistant" as const, content: `BASELINE_CREATED ${baselineSummary}` },
+      ],
+    },
+  };
   return { ...raw, explanation: await generateRagExplanation(raw, ai) };
+}
+
+export async function generateRagBuild(sourceQuery: string, ai: AiGenerationOptions): Promise<RagBuildRecommendation> {
+  const intent = await parseBuildIntent(sourceQuery, ai);
+  return generateRagBuildFromRequest(sourceQuery, ai, intent.request, intent.mode);
 }

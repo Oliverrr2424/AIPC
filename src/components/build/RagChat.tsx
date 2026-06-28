@@ -1,18 +1,19 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { ArrowRight, Brain, CheckCircle, Database, MagnifyingGlass, SpinnerGap, WarningCircle } from "@phosphor-icons/react";
 import type { RagBuildRecommendation } from "@/types/knowledge";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { BuildCurveLoader } from "@/components/ui/CurveLoader";
-import { LoaderVariantPicker } from "@/components/ui/LoaderVariantPicker";
+import { BuildCurveLoader, CurveLoader } from "@/components/ui/CurveLoader";
 import { formatPrice } from "@/lib/pricing/priceEstimator";
 import { PartsTable } from "./PartsTable";
 import { CompatibilityPanel } from "./CompatibilityPanel";
-import { PerformancePanel } from "./PerformancePanel";
 import { BenchmarkPanel } from "./BenchmarkPanel";
 import { AiExplanationPanel } from "./AiExplanationPanel";
 import { AI_MODELS, DEFAULT_AI_OPTIONS, type AiModelId, type ThinkingMode } from "@/types/ai";
+
+const PerformancePanel = dynamic(() => import("./PerformancePanel").then(m => m.PerformancePanel), { ssr: false, loading: () => null });
 
 const examples = [
   "USD 2200，主要玩 1440p 144Hz 游戏，希望安静、方便以后升级，不要 RGB。",
@@ -20,31 +21,63 @@ const examples = [
   "预算 1800 美元，做后端开发、Docker 和数据库，已经有 WD Black SN850X 1TB。",
 ];
 
+type ChatMessage = { role: "user" | "assistant"; content: string; thinking?: boolean };
+
 export function RagChat() {
   const [query, setQuery] = useState(examples[0]);
+  const [followUp, setFollowUp] = useState("");
   const [result, setResult] = useState<RagBuildRecommendation>();
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [model, setModel] = useState<AiModelId>(DEFAULT_AI_OPTIONS.model);
   const [thinking, setThinking] = useState<ThinkingMode>(DEFAULT_AI_OPTIONS.thinking);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   async function submit(event: React.FormEvent) {
-    event.preventDefault(); setLoading(true); setError(""); setResult(undefined);
+    event.preventDefault(); setLoading(true); setError("");
     try {
       const response = await fetch("/api/rag/recommend", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query, model, thinking }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Unable to generate a build.");
       setResult(data);
+      setMessages([{ role: "user", content: query }, { role: "assistant", content: data.interaction?.message || "Baseline build created." }]);
     } catch (err) { setError(err instanceof Error ? err.message : "Unable to generate a build."); }
     finally { setLoading(false); }
   }
 
+  async function refine(event: React.FormEvent) {
+    event.preventDefault();
+    if (!result || followUp.trim().length < 2) return;
+    const message = followUp.trim();
+    setFollowUp(""); setError("");
+    setMessages(current => [...current, { role: "user", content: message }, { role: "assistant", content: "", thinking: true }]);
+    setLoading(true);
+    try {
+      const response = await fetch("/api/rag/recommend", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: message, currentBuild: result, model, thinking }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Unable to update the build.");
+      setResult(data);
+      setMessages(current => {
+        const next = [...current];
+        next[next.length - 1] = { role: "assistant", content: data.interaction?.message || "Build updated." };
+        return next;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to update the build.");
+      setMessages(current => current.slice(0, -1));
+    } finally { setLoading(false); }
+  }
+
+  function reset() {
+    setResult(undefined); setMessages([]); setFollowUp(""); setError("");
+  }
+
   return <div>
-    <form onSubmit={submit} className="surface overflow-hidden rounded-2xl shadow-panel">
-      <div className="grid lg:grid-cols-[1fr_320px]">
-        <div className="p-5 sm:p-7">
+    {!result && <form onSubmit={submit} className="surface overflow-hidden rounded-2xl shadow-panel">
+      <div className="grid lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="flex flex-col justify-center p-5 sm:p-8 lg:p-10">
           <label htmlFor="build-query" className="flex items-center gap-2 text-sm font-semibold"><Brain size={19} className="text-[var(--accent)]"/>Describe the machine you need</label>
-          <textarea id="build-query" value={query} onChange={event => setQuery(event.target.value)} rows={5} className="mt-4 w-full resize-none rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-4 text-base leading-7 text-[var(--text)] placeholder:text-[var(--muted)]" placeholder="Include budget, currency, workloads, preferences, and any parts you already own." />
+          <textarea id="build-query" value={query} onChange={event => setQuery(event.target.value)} rows={8} className="mt-4 w-full resize-none rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-4 text-base leading-7 text-[var(--text)] placeholder:text-[var(--muted)]" placeholder="Include budget, currency, workloads, preferences, and any parts you already own." />
           <div className="mt-4 flex flex-wrap gap-2">{examples.map((example, index) => <button type="button" key={example} onClick={() => setQuery(example)} className="rounded-lg border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-left text-xs text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--text)]">Example {index + 1}</button>)}</div>
         </div>
         <aside className="border-t border-[var(--line)] bg-[var(--panel-2)] p-5 sm:p-7 lg:border-l lg:border-t-0">
@@ -63,17 +96,48 @@ export function RagChat() {
             {model === "gemini-2.5-flash" && <p className="mt-2 text-[10px] leading-4 text-[var(--muted)]">Mode switch applies to DeepSeek V4 models.</p>}
           </div>
           <div className="mt-5 space-y-4 text-sm text-[var(--muted)]">
-            <div className="flex items-center gap-3"><Brain/>Parse intent</div><div className="flex items-center gap-3"><MagnifyingGlass/>Retrieve evidence</div><div className="flex items-center gap-3"><Database/>Score candidates</div><div className="flex items-center gap-3"><CheckCircle/>Validate compatibility</div>
+            <div className="flex items-center gap-3"><Brain/>Parse intent</div><div className="flex items-center gap-3"><MagnifyingGlass/>Embed + vector retrieve</div><div className="flex items-center gap-3"><Database/>Score candidates</div><div className="flex items-center gap-3"><CheckCircle/>Validate compatibility</div>
           </div>
           <Button disabled={loading || query.trim().length < 8} className="mt-7 w-full">{loading ? <><SpinnerGap className="animate-spin"/>Retrieving evidence</> : <>Build with RAG <ArrowRight/></>}</Button>
           {error && <p className="mt-4 rounded-lg bg-red-500/10 p-3 text-sm text-[var(--danger)]">{error}</p>}
-          <div className="mt-7 border-t border-[var(--line)] pt-6"><LoaderVariantPicker compact/></div>
         </aside>
       </div>
-    </form>
-    {loading && <div className="mt-10 surface rounded-2xl p-10 sm:p-16"><BuildCurveLoader label="Synthesizing your build" size={240}/></div>}
+    </form>}
+    {result && <Conversation result={result} messages={messages} value={followUp} onChange={setFollowUp} onSubmit={refine} onReset={reset} loading={loading} error={error}/>}
+    {loading && !result && <div className="mt-10 surface rounded-2xl p-10 sm:p-16"><BuildCurveLoader label="Synthesizing your build" size={240}/></div>}
     {result && <RagResult result={result}/>} 
   </div>;
+}
+
+function Conversation({ result, messages, value, onChange, onSubmit, onReset, loading, error }: {
+  result: RagBuildRecommendation;
+  messages: ChatMessage[];
+  value: string;
+  onChange: (value: string) => void;
+  onSubmit: (event: React.FormEvent) => void;
+  onReset: () => void;
+  loading: boolean;
+  error: string;
+}) {
+  const interaction = result.interaction;
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const transcript = transcriptRef.current;
+    if (transcript) transcript.scrollTop = transcript.scrollHeight;
+  }, [messages.length, messages[messages.length - 1]?.content]);
+  return <section className="surface overflow-hidden rounded-2xl shadow-panel">
+    <div className="border-b border-[var(--line)] p-5 sm:p-7">
+      <div className="flex flex-wrap items-center justify-between gap-3"><div><div className="mono text-xs font-semibold text-[var(--accent)]">ITERATE THE BASELINE</div><h2 className="mt-2 text-xl font-semibold">Change it in plain language</h2></div><button type="button" onClick={onReset} className="text-xs font-medium text-[var(--muted)] hover:text-[var(--text)]">Start a new baseline</button></div>
+      <div ref={transcriptRef} className="mt-5 max-h-72 space-y-3 overflow-y-auto pr-1">{messages.map((message, index) => message.thinking ? <div key={`thinking-${index}`} className="max-w-3xl rounded-xl bg-[var(--panel-2)] px-4 py-3 text-sm leading-6 text-[var(--text)]"><div className="mono mb-1 text-[10px] uppercase opacity-65">Build agent</div><div className="flex items-center gap-3"><CurveLoader size={40} hideVariantTag /><span className="text-sm text-[var(--muted)]">Thinking…</span></div></div> : <div key={`${message.role}-${index}`} className={`max-w-3xl rounded-xl px-4 py-3 text-sm leading-6 ${message.role === "user" ? "ml-auto bg-[var(--accent)] text-white" : "bg-[var(--panel-2)] text-[var(--text)]"}`}><div className="mono mb-1 text-[10px] uppercase opacity-65">{message.role === "user" ? "You" : "Build agent"}</div>{message.content}</div>)}</div>
+      {interaction?.changedParts.length ? <div className="mt-4 flex flex-wrap gap-2">{interaction.changedParts.map(change => <Badge key={change.category} tone={change.inducedByCompatibility ? "warning" : "accent"}>{change.category.toUpperCase()} {change.inducedByCompatibility ? "LINKED" : "CHANGED"}</Badge>)}</div> : null}
+      {interaction?.tokenUsage && <p className="mono mt-3 text-[10px] text-[var(--muted)]">DeepSeek input {interaction.tokenUsage.promptTokens} tokens · cache hit {interaction.tokenUsage.cacheHitTokens} · cache miss {interaction.tokenUsage.cacheMissTokens}</p>}
+    </div>
+    <form onSubmit={onSubmit} className="grid gap-3 bg-[var(--panel-2)] p-5 sm:grid-cols-[1fr_auto] sm:p-6">
+      <input value={value} onChange={event => onChange(event.target.value)} disabled={loading} className="h-12 rounded-xl border border-[var(--line)] bg-[var(--panel)] px-4 text-sm text-[var(--text)] placeholder:text-[var(--muted)]" placeholder='例如：“换成 5090”“不要水冷”“便宜一点”“为什么不用 14900K”'/>
+      <Button disabled={loading || value.trim().length < 2}>{loading ? <><SpinnerGap className="animate-spin"/>Updating</> : <>Update build <ArrowRight/></>}</Button>
+      {error && <p className="text-sm text-[var(--danger)] sm:col-span-2">{error}</p>}
+    </form>
+  </section>;
 }
 
 function RagResult({ result }: { result: RagBuildRecommendation }) {
@@ -84,21 +148,24 @@ function RagResult({ result }: { result: RagBuildRecommendation }) {
   const usedLocalParser = result.parserMode === "heuristic";
   const budgetRatio = result.request.budget > 0 ? result.totalPrice / result.request.budget : 0;
   const overBudget = budgetRatio > 1.2;
+  const retrieval = result.retrieval || { mode: result.retrievedChunks.some(chunk => chunk.retrievalMode === "vector") ? "vector" : "keyword-fallback", vectorChunkCount: 0 };
+  const retrievalFallback = retrieval.mode === "keyword-fallback";
   return <div className="mt-10 space-y-6">
     <header className="grid gap-6 border-b border-[var(--line)] pb-8 lg:grid-cols-[1fr_auto] lg:items-end">
-      <div><div className="flex flex-wrap gap-2"><Badge tone="accent">{parserLabel}</Badge><Badge tone="neutral">{modelLabel} · {result.thinkingMode === "enabled" ? "THINKING" : "NON-THINKING"}</Badge><Badge tone={status === "PASS" ? "success" : status === "WARNING" ? "warning" : "danger"}>{status === "PASS" ? <CheckCircle/> : <WarningCircle/>}{status} COMPATIBILITY</Badge></div><h2 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">{result.title}</h2><p className="mt-3 max-w-3xl text-[var(--muted)]">Parsed as {result.request.useCase} with a {formatPrice(result.request.budget, result.request.currency)} budget. Retrieved {result.retrievedChunks.length} evidence chunks before selection.</p></div>
+      <div><div className="flex flex-wrap gap-2"><Badge tone="accent">{parserLabel}</Badge><Badge tone={retrievalFallback ? "warning" : "success"}>{retrieval.mode === "vector" ? `VECTOR RAG · ${retrieval.embeddingModel || "EMBEDDINGS"}` : retrieval.mode === "keyword" ? "KEYWORD MODE" : "KEYWORD FALLBACK"}</Badge><Badge tone="neutral">{modelLabel} · {result.thinkingMode === "enabled" ? "THINKING" : "NON-THINKING"}</Badge><Badge tone={status === "PASS" ? "success" : status === "WARNING" ? "warning" : "danger"}>{status === "PASS" ? <CheckCircle/> : <WarningCircle/>}{status} COMPATIBILITY</Badge></div><h2 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">{result.title}</h2><p className="mt-3 max-w-3xl text-[var(--muted)]">Parsed as {result.request.useCase} with a {formatPrice(result.request.budget, result.request.currency)} budget. Retrieved {result.retrievedChunks.length} evidence chunks before deterministic selection.</p></div>
       <div><div className="text-sm text-[var(--muted)]">Estimated total</div><div className="mono mt-1 text-4xl font-semibold">{formatPrice(result.totalPrice, result.request.currency)}</div></div>
     </header>
-    {(usedLocalParser || overBudget) && <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5 sm:p-6">
+    {(usedLocalParser || overBudget || retrievalFallback) && <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5 sm:p-6">
       <div className="flex items-start gap-3"><WarningCircle size={20} weight="fill" className="mt-0.5 shrink-0 text-[var(--warning)]"/><div className="space-y-1.5 text-sm leading-6">
         {usedLocalParser && <p><strong className="text-[var(--warning)]">LLM intent parser unavailable.</strong> No API key configured, so intent was parsed with local keyword rules. Set <code className="mono rounded bg-[var(--panel-2)] px-1.5 py-0.5 text-xs">DEEPSEEK_API_KEY</code> or <code className="mono rounded bg-[var(--panel-2)] px-1.5 py-0.5 text-xs">GEMINI_API_KEY</code> in <code className="mono rounded bg-[var(--panel-2)] px-1.5 py-0.5 text-xs">.env.local</code> for richer constraint extraction. The deterministic pipeline (candidate scoring + compatibility) still ran on the parsed request.</p>}
+        {retrievalFallback && <p><strong className="text-[var(--warning)]">Semantic retrieval unavailable.</strong> This response used the explicit keyword fallback, not vector RAG. {retrieval.fallbackReason || "Run the PostgreSQL migration and knowledge indexing command."}</p>}
         {overBudget && <p><strong className="text-[var(--warning)]">Build exceeds budget by {Math.round((budgetRatio - 1) * 100)}%.</strong> The budget optimizer could not reach {formatPrice(result.request.budget, result.request.currency)} — even the cheapest valid configuration in the candidate pool costs more. Check that the budget and currency were parsed correctly, or raise the budget.</p>}
       </div></div>
     </section>}
     {result.request.constraints?.length ? <section className="surface rounded-2xl p-5 sm:p-6"><div className="flex items-center justify-between gap-4"><div><h2 className="font-semibold">Interpreted constraints</h2><p className="mt-1 text-sm text-[var(--muted)]">LLM structured output, schema-validated before retrieval</p></div><Badge tone="neutral">{result.request.constraints.length} RULES</Badge></div><div className="mt-4 flex flex-wrap gap-2">{result.request.constraints.map(item => <span key={item.id} title={`${item.sourceText}: ${item.interpretation}`} className={`rounded-lg border px-3 py-2 text-xs ${item.strength === "required" ? "border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-300" : item.strength === "excluded" ? "border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-300" : "border-[var(--line)] bg-[var(--panel-2)] text-[var(--muted)]"}`}><strong className="uppercase">{item.strength}</strong> · {item.target}: {item.value}<span className="ml-1 opacity-60">({item.origin || "llm"})</span></span>)}</div></section> : null}
     <section className="surface rounded-2xl p-6 sm:p-8"><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent)]"><MagnifyingGlass/></span><div><h2 className="text-xl font-semibold">Retrieved reasoning</h2><p className="text-sm text-[var(--muted)]">Why candidates entered the pool and why the winner survived scoring</p></div></div><div className="mt-7 grid gap-3 lg:grid-cols-2">{result.reasoning.map(item => <div key={item.category} className="rounded-xl bg-[var(--panel-2)] p-4"><div className="mono text-[10px] uppercase text-[var(--accent)]">{item.category}</div><div className="mt-2 font-semibold">{item.selected}</div><p className="mt-2 text-sm leading-6 text-[var(--muted)]">{item.reason}</p><details className="mt-3 text-xs text-[var(--muted)]"><summary className="cursor-pointer font-medium text-[var(--text)]">Candidates considered</summary><p className="mt-2 leading-5">{item.considered.join(", ")}</p></details></div>)}</div></section>
-    <div className="grid gap-6 xl:grid-cols-[1fr_380px]"><PartsTable build={result}/><div className="space-y-6"><PerformancePanel build={result}/>{result.performance&&<BenchmarkPanel performance={result.performance}/>}<CompatibilityPanel results={result.compatibility}/></div></div>
-    <section className="surface rounded-2xl p-6 sm:p-8"><div className="flex items-center justify-between gap-4"><div><h2 className="text-xl font-semibold">RAG evidence</h2><p className="mt-1 text-sm text-[var(--muted)]">Local knowledge snippets cited by the explanation</p></div><Badge tone="neutral">{result.retrievedChunks.length} CHUNKS</Badge></div><div className="mt-6 grid gap-3 lg:grid-cols-2">{result.retrievedChunks.slice(0, 10).map((chunk, index) => <article key={chunk.id} className="rounded-xl border border-[var(--line)] p-4"><div className="flex items-center justify-between gap-3"><span className="mono text-xs font-semibold text-[var(--accent)]">K{index + 1}</span><span className="mono text-[10px] text-[var(--muted)]">{chunk.relevanceScore}% relevance</span></div><h3 className="mt-3 font-semibold">{chunk.title}</h3><p className="mt-2 text-sm leading-6 text-[var(--muted)]">{chunk.content}</p><div className="mt-3 flex flex-wrap gap-1.5">{chunk.tags.slice(0, 5).map(tag => <span key={tag} className="rounded bg-[var(--panel-2)] px-2 py-1 text-[10px] text-[var(--muted)]">{tag}</span>)}</div></article>)}</div></section>
+    <div className="grid gap-6 xl:grid-cols-[1fr_380px]"><div className="space-y-6"><PartsTable build={result}/><CompatibilityPanel results={result.compatibility}/></div><div className="space-y-6"><PerformancePanel build={result}/>{result.performance&&<BenchmarkPanel performance={result.performance}/>}</div></div>
+    <section className="surface rounded-2xl p-6 sm:p-8"><div className="flex items-center justify-between gap-4"><div><h2 className="text-xl font-semibold">RAG evidence</h2><p className="mt-1 text-sm text-[var(--muted)]">Retrieved knowledge chunks cited by the explanation</p></div><Badge tone="neutral">{result.retrievedChunks.length} CHUNKS</Badge></div><div className="mt-6 grid gap-3 lg:grid-cols-2">{result.retrievedChunks.slice(0, 10).map((chunk, index) => <article key={chunk.id} className="rounded-xl border border-[var(--line)] p-4"><div className="flex items-center justify-between gap-3"><span className="mono text-xs font-semibold text-[var(--accent)]">K{index + 1} · {chunk.retrievalMode === "vector" ? "VECTOR" : "KEYWORD"}</span><span className="mono text-[10px] text-[var(--muted)]">{chunk.similarityScore != null ? `${Math.round(chunk.similarityScore * 100)}% cosine` : `${chunk.relevanceScore}% relevance`}</span></div><h3 className="mt-3 font-semibold">{chunk.title}</h3><p className="mt-2 text-sm leading-6 text-[var(--muted)]">{chunk.content}</p>{chunk.sourceTitle && <p className="mono mt-3 text-[10px] text-[var(--muted)]">Source: {chunk.sourceUrl ? <a className="underline" href={chunk.sourceUrl} target="_blank" rel="noreferrer">{chunk.sourceTitle}</a> : chunk.sourceTitle}</p>}<div className="mt-3 flex flex-wrap gap-1.5">{chunk.tags.slice(0, 5).map(tag => <span key={tag} className="rounded bg-[var(--panel-2)] px-2 py-1 text-[10px] text-[var(--muted)]">{tag}</span>)}</div></article>)}</div></section>
     <div className="grid gap-6 lg:grid-cols-[1fr_380px]"><AiExplanationPanel text={result.explanation}/><section className="surface rounded-2xl p-6"><h2 className="text-lg font-semibold">Alternative builds</h2><p className="mt-1 text-sm text-[var(--muted)]">Nearby paths from the same candidate pools</p><div className="mt-5 space-y-5">{result.alternativeBuilds.map(variant => <div key={variant.title} className="rounded-xl bg-[var(--panel-2)] p-4"><div className="font-semibold">{variant.title}</div><div className="mono mt-2 text-sm text-[var(--accent)]">{formatPrice(variant.totalPrice, result.request.currency)}</div><p className="mt-2 text-sm leading-6 text-[var(--muted)]">{variant.changes.map(change => `${change.from} to ${change.to}`).join("; ")}. {variant.tradeoff}</p></div>)}</div></section></div>
   </div>;
 }
