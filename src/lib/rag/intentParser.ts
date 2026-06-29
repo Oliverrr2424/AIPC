@@ -1,7 +1,7 @@
 import { parts } from "@/data/parts";
 import { generateModelJson } from "@/lib/ai/modelGateway";
 import type { AiGenerationOptions } from "@/types/ai";
-import type { BuildRequest, UseCase } from "@/types/build";
+import type { BuildRequest, InterpretedConstraint, UseCase } from "@/types/build";
 import type { IntentParseResult } from "@/types/knowledge";
 import { extractIntentConstraints, intentKnowledgeRules, semanticRequestPatch, validateLlmConstraints } from "./constraintExtractor";
 
@@ -110,5 +110,55 @@ export async function parseBuildIntent(query: string, ai: AiGenerationOptions): 
   const constraints = parsed ? validateLlmConstraints(parsed.constraints) : extractIntentConstraints(query);
   const semanticPatch = semanticRequestPatch(constraints);
   const mode = parsed ? (ai.model.startsWith("deepseek-") ? "deepseek" : "gemini") : "heuristic";
-  return { request: { ...normalize(parsed || fallback, fallback), ...semanticPatch, constraints }, mode, summary: parsed?.summary || fallback.summary || "Intent parsed." };
+  const request = { ...normalize(parsed || fallback, fallback), ...semanticPatch, constraints };
+  return { request: splitOwnedFromPinned(query, withExplicitVramFloor(query, request)), mode, summary: parsed?.summary || fallback.summary || "Intent parsed." };
+}
+
+// An explicitly stated minimum VRAM ("at least 32 GB VRAM", "至少 32GB 显存") is a
+// hard capacity requirement, not a soft preference. The schema captures the
+// number in `vramPreference`, but the GPU pool only enforces it as a hard filter
+// when a matching required constraint exists — so synthesize one when the user's
+// own words pin a VRAM floor and the LLM did not already emit it.
+function withExplicitVramFloor(query: string, request: BuildRequest): BuildRequest {
+  const match = query.match(/(\d+)\s*gb\s*(?:of\s*)?vram|vram[^\d]{0,12}(\d+)\s*gb|(\d+)\s*gb\s*显存|显存[^\d]{0,8}(\d+)\s*gb/i);
+  if (!match) return request;
+  const vram = Number(match[1] || match[2] || match[3] || match[4]);
+  if (!Number.isFinite(vram) || vram <= 0) return request;
+  const alreadyHard = (request.constraints || []).some(item => item.target === "workloadTarget" && item.strength === "required" && /vram|显存/i.test(`${item.value} ${item.sourceText}`));
+  const next = { ...request, vramPreference: (request.vramPreference && request.vramPreference >= vram ? request.vramPreference : vram) as BuildRequest["vramPreference"] };
+  if (alreadyHard) return next;
+  const constraint: InterpretedConstraint = {
+    id: `vram-min-${vram}`,
+    target: "workloadTarget",
+    value: `vram>=${vram}`,
+    strength: "required",
+    sourceText: match[0],
+    interpretation: `User requires at least ${vram} GB of VRAM.`,
+    origin: "fallback",
+  };
+  return { ...next, constraints: [...(next.constraints || []), constraint] };
+}
+
+// `existingPartIds` historically conflated "hardware the user already owns"
+// (excluded from the budget) with "a specific model the user wants us to use"
+// (must be selected AND counted in the budget). Only treat named parts as owned
+// when the request actually expresses ownership; otherwise pin them as a
+// required model so they are priced into the build.
+function splitOwnedFromPinned(query: string, request: BuildRequest): BuildRequest {
+  const ownsHardware = /我(?:已经|已)?有|已有|现有|手头(?:有)?|沿用|复用|existing|already\s+(?:have|own)|reuse|i\s+(?:have|own)|keep\s+my/i.test(query);
+  const named = request.existingPartIds || [];
+  if (ownsHardware || !named.length) return request;
+  const alreadyPinned = new Set((request.constraints || []).filter(item => item.target === "workloadTarget" && item.value.startsWith("part:")).map(item => item.value.slice(5)));
+  const toPin = named.filter(id => !alreadyPinned.has(id));
+  if (!toPin.length) return { ...request, existingPartIds: [] };
+  const pinnedConstraints: InterpretedConstraint[] = toPin.map(id => ({
+    id: `pin-${id}`,
+    target: "workloadTarget",
+    value: `part:${id}`,
+    strength: "required",
+    sourceText: parts.find(part => part.id === id)?.name || id,
+    interpretation: "User named this specific model to use; priced into the build.",
+    origin: "fallback",
+  }));
+  return { ...request, existingPartIds: [], constraints: [...(request.constraints || []), ...pinnedConstraints] };
 }
