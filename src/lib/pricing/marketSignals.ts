@@ -58,8 +58,12 @@ function trendFor(prices: number[], current: number): { trend: MarketTrend; chan
 function buildSignal(part: Part, inputRows: Snapshot[], requestedRegion: string): MarketSignal {
   if (!inputRows.length) return fallbackSignal(part);
 
+  // Only the requested region's snapshots are a valid market price. A US request
+  // with no US data must NOT adopt a Canadian retailer price as the effective
+  // price — fall back to the region-neutral catalog price with low confidence.
   const regional = inputRows.filter(row => row.region === requestedRegion);
-  const rows = regional.length ? regional : inputRows;
+  if (!regional.length) return fallbackSignal(part);
+  const rows = regional;
   const latest = latestPerRetailer(rows);
   const realLatest = latest.filter(row => row.retailer !== "list");
   const stocked = realLatest.filter(row => row.inStock);
@@ -81,7 +85,7 @@ function buildSignal(part: Part, inputRows: Snapshot[], requestedRegion: string)
   const availability = chosen.inStock ? "in_stock" as const : "out_of_stock" as const;
   const availabilityScore = chosen.inStock ? 100 : 0;
   const dealScore = Math.max(0, Math.min(100, 50 + (discount ?? 0) * 2 + (trend === "falling" ? 8 : trend === "rising" ? -8 : 0)));
-  const regionConfidence = regional.length ? 1 : 0.7;
+  const regionConfidence = 1;
   const historyConfidence = Math.min(1, 0.45 + prices.length / 10);
   const confidence = round(regionConfidence * historyConfidence * (isStale ? 0.72 : 1), 2);
   const marketScore = round(availabilityScore * 0.5 + freshness * 0.25 + dealScore * 0.15 + confidence * 100 * 0.1, 1);

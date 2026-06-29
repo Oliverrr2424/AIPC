@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { generateRagBuild } from "@/lib/rag/ragBuildGenerator";
 import { reviseRagBuild } from "@/lib/rag/conversationAgent";
+import { ConstraintConflictError } from "@/lib/rag/constraintConflict";
 import { partById } from "@/data/parts";
 import { DEFAULT_AI_OPTIONS, isAiModelId, type ThinkingMode } from "@/types/ai";
 import type { RagBuildRecommendation } from "@/types/knowledge";
@@ -30,6 +31,11 @@ export async function POST(request: Request) {
     };
     return NextResponse.json(currentBuild ? await reviseRagBuild(body.query.trim(), currentBuild, ai) : await generateRagBuild(body.query.trim(), ai));
   } catch (error) {
+    if (error instanceof ConstraintConflictError) {
+      // Hard constraints have no joint solution. Tell the user exactly what to
+      // relax instead of silently substituting a non-matching part.
+      return NextResponse.json({ error: error.message, conflict: { constraints: error.conflicts } }, { status: 422 });
+    }
     console.error("RAG recommendation failed:", error instanceof Error ? error.message : "Unknown error");
     return NextResponse.json({ error: "Unable to generate a RAG recommendation." }, { status: 500 });
   }

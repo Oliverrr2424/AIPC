@@ -1,50 +1,17 @@
-import { partById, parts as catalogParts } from "@/data/parts";
 import { checkCompatibility, estimateWattage } from "@/lib/compatibility/compatibilityChecker";
 import { estimatePerformance } from "@/lib/performance/performanceEstimator";
 import { priceIn } from "@/lib/pricing/priceEstimator";
-import { marketRegion, summarizeBuildMarket, withMarketPrice } from "@/lib/pricing/marketSignals";
+import { marketRegion, summarizeBuildMarket } from "@/lib/pricing/marketSignals";
 import type { AiGenerationOptions } from "@/types/ai";
 import type { BuildRequest } from "@/types/build";
 import type { BuildParts, Currency, Part, PartCategory } from "@/types/parts";
-import type { MarketSignal } from "@/types/market";
 import type { AlternativeBuildSummary, IntentParseResult, PartCandidate, RagBuildRecommendation, RagReasoningItem } from "@/types/knowledge";
-import { retrieveCandidatePools } from "./candidateRetriever";
+import { evidenceFor, retrieveCandidatePools, scoreCandidateForDisplay } from "./candidateRetriever";
+import { optimizeBuild } from "./buildOptimizer";
 import { parseBuildIntent } from "./intentParser";
 import { generateRagExplanation } from "./ragExplanation";
 
 const selectedCandidate = (candidates: PartCandidate[], part: Part) => candidates.find(candidate => candidate.part.id === part.id) || candidates[0];
-const existing = <T extends Part>(ids: string[] | undefined, category: T["category"], marketSignals: Map<string, MarketSignal>) => {
-  const part = (ids || []).map(partById).find(item => item?.category === category) as T | undefined;
-  return part ? withMarketPrice(part, marketSignals.get(part.id)) : undefined;
-};
-const first = <T extends Part>(candidates: PartCandidate[], predicate: (part: T) => boolean = () => true) => candidates.map(candidate => candidate.part as T).find(predicate);
-
-function optimizeToBudget(initial: BuildParts, pools: Awaited<ReturnType<typeof retrieveCandidatePools>>["pools"], request: RagBuildRecommendation["request"]) {
-  const owned = new Set(request.existingPartIds || []);
-  const total = (build: BuildParts) => Object.values(build).reduce((sum, part) => sum + (owned.has(part.id) ? 0 : priceIn(part, request.currency)), 0);
-  const adjustable: PartCategory[] = ["gpu", "cpu", "motherboard", "ram", "storage", "cooler", "case", "psu"];
-  let build = initial;
-
-  while (total(build) > request.budget) {
-    const moves = adjustable.flatMap(category => {
-      const current = build[category];
-      if (owned.has(current.id)) return [];
-      const currentCandidate = selectedCandidate(pools[category], current);
-      return pools[category].flatMap(candidate => {
-        const saving = priceIn(current, request.currency) - priceIn(candidate.part, request.currency);
-        if (saving <= 0) return [];
-        const next = { ...build, [category]: candidate.part } as BuildParts;
-        if (category === "motherboard" && !next.motherboard.cpuTiers.includes(next.cpu.tier)) return [];
-        if (checkCompatibility(next).some(result => result.status === "FAIL")) return [];
-        const scoreLoss = Math.max(0, (currentCandidate?.score.totalScore || 0) - candidate.score.totalScore);
-        return [{ next, saving, utility: saving / (scoreLoss + 5) }];
-      });
-    }).sort((a, b) => b.utility - a.utility || b.saving - a.saving);
-    if (!moves.length) break;
-    build = moves[0].next;
-  }
-  return build;
-}
 
 function makeAlternatives(parts: BuildParts, pools: Awaited<ReturnType<typeof retrieveCandidatePools>>["pools"], currency: Currency): AlternativeBuildSummary[] {
   const currentTotal = Object.values(parts).reduce((sum, part) => sum + priceIn(part, currency), 0);
@@ -60,27 +27,19 @@ function makeAlternatives(parts: BuildParts, pools: Awaited<ReturnType<typeof re
 
 export async function generateRagBuildFromRequest(sourceQuery: string, ai: AiGenerationOptions, request: BuildRequest, parserMode: IntentParseResult["mode"]): Promise<RagBuildRecommendation> {
   const { pools, chunks, retrieval, marketSignals } = await retrieveCandidatePools(request, sourceQuery);
-  const gpu = existing<BuildParts["gpu"]>(request.existingPartIds, "gpu", marketSignals) || first<BuildParts["gpu"]>(pools.gpu)!;
-  const cpu = existing<BuildParts["cpu"]>(request.existingPartIds, "cpu", marketSignals) || first<BuildParts["cpu"]>(pools.cpu)!;
-  const motherboard = existing<BuildParts["motherboard"]>(request.existingPartIds, "motherboard", marketSignals) || first<BuildParts["motherboard"]>(pools.motherboard, part => part.socket === cpu.socket && part.cpuTiers.includes(cpu.tier) && (!request.preferSmallFormFactor || part.formFactor === "Mini-ITX")) || first<BuildParts["motherboard"]>(pools.motherboard, part => part.socket === cpu.socket && (!request.preferSmallFormFactor || part.formFactor === "Mini-ITX")) || first<BuildParts["motherboard"]>(pools.motherboard, part => part.socket === cpu.socket)!;
-  const ram = existing<BuildParts["ram"]>(request.existingPartIds, "ram", marketSignals) || first<BuildParts["ram"]>(pools.ram, part => part.memoryType === motherboard.memoryType)!;
-  const storage = existing<BuildParts["storage"]>(request.existingPartIds, "storage", marketSignals) || first<BuildParts["storage"]>(pools.storage, part => motherboard.storageInterfaces.includes(part.interface))!;
-  const ownedCase = existing<BuildParts["case"]>(request.existingPartIds, "case", marketSignals);
-  let pcCase = ownedCase || first<BuildParts["case"]>(pools.case, part => part.supportedMotherboardFormFactors.includes(motherboard.formFactor) && part.maxGpuLengthMm >= gpu.lengthMm && (!request.preferSmallFormFactor || (part.supportedMotherboardFormFactors.length === 1 && part.supportedMotherboardFormFactors[0] === "Mini-ITX"))) || first<BuildParts["case"]>(pools.case, part => part.supportedMotherboardFormFactors.includes(motherboard.formFactor) && part.maxGpuLengthMm >= gpu.lengthMm)!;
-  let cooler = existing<BuildParts["cooler"]>(request.existingPartIds, "cooler", marketSignals) || first<BuildParts["cooler"]>(pools.cooler, part => part.supportedSockets.includes(cpu.socket) && part.tdpRatingWatts >= cpu.tdpWatts && (part.type === "aio" || !part.heightMm || part.heightMm <= pcCase.maxCoolerHeightMm));
-  if (!cooler) {
-    cooler = first<BuildParts["cooler"]>(pools.cooler, part => part.supportedSockets.includes(cpu.socket) && part.tdpRatingWatts >= cpu.tdpWatts);
-    if (cooler && !ownedCase) pcCase = first<BuildParts["case"]>(pools.case, part => part.supportedMotherboardFormFactors.includes(motherboard.formFactor) && part.maxGpuLengthMm >= gpu.lengthMm && (cooler!.type === "aio" || !cooler!.heightMm || cooler!.heightMm <= part.maxCoolerHeightMm)) || pcCase;
+  // Whole-build optimizer: maximize total capability/quality subject to the
+  // budget (hard) and all compatibility rules. Replaces the old greedy "pool
+  // top + downsize", which under-spent now that value rewards cheapness.
+  const parts = optimizeBuild({ pools, request, marketSignals, chunks });
+  // Coolers/PSUs (and owned parts) may have been chosen from outside the scored
+  // pool; surface them in their pool so reasoning and alternatives can describe
+  // the selection and its evidence.
+  for (const [category, part] of Object.entries(parts) as Array<[PartCategory, Part]>) {
+    if (!pools[category].some(candidate => candidate.part.id === part.id)) {
+      const market = marketSignals.get(part.id)!;
+      pools[category].unshift({ part, market, evidence: evidenceFor(part, category, chunks).slice(0, 3), score: scoreCandidateForDisplay(part, request, category, chunks, market) });
+    }
   }
-  if (!cooler) throw new Error(`No compatible ${request.preferredCooling === "air" ? "air " : ""}cooler is available for ${cpu.name}.`);
-  const provisional = { cpu, gpu, motherboard, ram, storage, cooler, case: pcCase };
-  const load = Math.round(cpu.tdpWatts + gpu.tdpWatts + 85 + (ram.capacityGb / 8) * 3 + storage.capacityTb * 5), minimumPsu = Math.ceil(load * 1.35 / 50) * 50;
-  const fullCatalogPsu = catalogParts
-    .filter((part): part is BuildParts["psu"] => part.category === "psu" && part.wattage >= minimumPsu && pcCase.psuFormFactors.includes(part.formFactor))
-    .map(part => withMarketPrice(part, marketSignals.get(part.id)))
-    .sort((a, b) => priceIn(a, request.currency) - priceIn(b, request.currency))[0];
-  const psu = existing<BuildParts["psu"]>(request.existingPartIds, "psu", marketSignals) || first<BuildParts["psu"]>(pools.psu, part => part.wattage >= minimumPsu && pcCase.psuFormFactors.includes(part.formFactor)) || fullCatalogPsu || first<BuildParts["psu"]>(pools.psu, part => pcCase.psuFormFactors.includes(part.formFactor))!;
-  const parts = optimizeToBudget({ ...provisional, psu }, pools, request);
   const totalPrice = Object.values(parts).reduce((sum, part) => sum + priceIn(part, request.currency), 0);
   const compatibility = checkCompatibility(parts), performance = await estimatePerformance(parts, request), estimatedWattage = estimateWattage(parts);
   const selected = Object.entries(parts) as Array<[PartCategory, Part]>;
