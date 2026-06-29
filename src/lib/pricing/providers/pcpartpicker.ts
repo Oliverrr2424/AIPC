@@ -83,7 +83,9 @@ export class PCPartPickerProvider implements PriceProvider {
   requiresKey = false;
 
   isConfigured(): boolean {
-    return true; // always configured; public site
+    // Disabled by default. Catalog expansion uses a separately published,
+    // MIT-licensed dataset instead of crawling retailer pages.
+    return process.env.ENABLE_PCPARTPICKER_SCRAPE === "true";
   }
 
   async fetchQuote(part: { id: string; name: string; brand: string; category: string }): Promise<PriceQuote | null> {
@@ -103,6 +105,7 @@ export class PCPartPickerProvider implements PriceProvider {
   }
 
   async fetchMany(parts: { id: string; name: string; brand: string; category: string }[]): Promise<PriceProviderResult> {
+    if (!this.isConfigured()) return { quotes: [], errors: ["PCPartPicker HTML scraping is disabled"], provider: this.name };
     const errors: string[] = [];
     const quotes: PriceQuote[] = [];
     // Group by category to reuse one fetch per category (be polite to the site).

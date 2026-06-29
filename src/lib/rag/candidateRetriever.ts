@@ -1,18 +1,20 @@
 import { parts } from "@/data/parts";
 import { allocations } from "@/lib/recommendation/budgetAllocation";
 import { priceIn } from "@/lib/pricing/priceEstimator";
+import { getMarketSignals, withMarketPrice } from "@/lib/pricing/marketSignals";
 import type { BuildRequest, UseCase } from "@/types/build";
 import type { Part, PartCategory } from "@/types/parts";
 import type { CandidatePools, CandidateScore, PartCandidate, RetrievalSummary, RetrievedKnowledgeChunk } from "@/types/knowledge";
+import type { MarketSignal } from "@/types/market";
 import { retrieveKnowledgeChunks, summarizeRetrieval } from "./retrieval";
 
 const categories: PartCategory[] = ["cpu", "gpu", "motherboard", "ram", "storage", "cooler", "psu", "case"];
 const weights: Record<UseCase, Omit<CandidateScore, "totalScore">> = {
-  gaming: { performanceScore: .43, valueScore: .23, ragRelevanceScore: .16, preferenceScore: .11, upgradeabilityScore: .07 },
-  ai: { performanceScore: .36, valueScore: .17, ragRelevanceScore: .25, preferenceScore: .15, upgradeabilityScore: .07 },
-  development: { performanceScore: .32, valueScore: .22, ragRelevanceScore: .20, preferenceScore: .10, upgradeabilityScore: .16 },
-  video: { performanceScore: .36, valueScore: .20, ragRelevanceScore: .20, preferenceScore: .12, upgradeabilityScore: .12 },
-  balanced: { performanceScore: .33, valueScore: .24, ragRelevanceScore: .20, preferenceScore: .12, upgradeabilityScore: .11 },
+  gaming: { performanceScore: .35, valueScore: .19, marketScore: .14, ragRelevanceScore: .13, preferenceScore: .11, upgradeabilityScore: .08 },
+  ai: { performanceScore: .32, valueScore: .15, marketScore: .12, ragRelevanceScore: .20, preferenceScore: .14, upgradeabilityScore: .07 },
+  development: { performanceScore: .28, valueScore: .18, marketScore: .13, ragRelevanceScore: .16, preferenceScore: .10, upgradeabilityScore: .15 },
+  video: { performanceScore: .31, valueScore: .17, marketScore: .13, ragRelevanceScore: .17, preferenceScore: .11, upgradeabilityScore: .11 },
+  balanced: { performanceScore: .29, valueScore: .20, marketScore: .14, ragRelevanceScore: .16, preferenceScore: .11, upgradeabilityScore: .10 },
 };
 
 export function buildRetrievalQueries(request: BuildRequest) {
@@ -47,6 +49,10 @@ function preference(part: Part, request: BuildRequest) {
   let score = 50;
   if (part.category === "cpu" && request.preferredCpuBrand !== "none") score += part.brand.toLowerCase() === request.preferredCpuBrand ? 45 : -100;
   if (part.category === "gpu" && request.preferredGpuBrand !== "none") score += part.brand.toLowerCase() === request.preferredGpuBrand ? 45 : -35;
+  if (part.category === "motherboard" && request.preferredCpuBrand && request.preferredCpuBrand !== "none") {
+    const socketMatchesBrand = request.preferredCpuBrand === "amd" ? part.socket === "AM5" : part.socket.startsWith("LGA");
+    score += socketMatchesBrand ? 45 : -100;
+  }
   if (request.preferredColor !== "none" && part.tags.includes(request.preferredColor || "")) score += 35;
   if (request.preferRgb && part.tags.includes("rgb")) score += 25;
   if (request.preferredCooling === "aio" && part.category === "cooler" && part.type === "aio") score += 35;
@@ -66,7 +72,7 @@ function upgradeability(part: Part) {
   return 60;
 }
 
-function scorePart(part: Part, request: BuildRequest, evidence: RetrievedKnowledgeChunk[]): CandidateScore {
+function scorePart(part: Part, request: BuildRequest, evidence: RetrievedKnowledgeChunk[], market: MarketSignal): CandidateScore {
   const target = request.budget * allocations[request.useCase][part.category];
   const actual = priceIn(part, request.currency);
   const performanceScore = performance(part, request);
@@ -75,11 +81,14 @@ function scorePart(part: Part, request: BuildRequest, evidence: RetrievedKnowled
   const ragRelevanceScore = evidence.length ? Math.max(...evidence.map(e => e.relevanceScore)) : 8;
   const preferenceScore = preference(part, request), upgradeabilityScore = upgradeability(part);
   const w = weights[request.useCase];
-  const totalScore = performanceScore*w.performanceScore + valueScore*w.valueScore + ragRelevanceScore*w.ragRelevanceScore + preferenceScore*w.preferenceScore + upgradeabilityScore*w.upgradeabilityScore;
-  return { performanceScore, valueScore, ragRelevanceScore, preferenceScore, upgradeabilityScore, totalScore };
+  const marketScore = market.marketScore;
+  const totalScore = performanceScore*w.performanceScore + valueScore*w.valueScore + marketScore*w.marketScore + ragRelevanceScore*w.ragRelevanceScore + preferenceScore*w.preferenceScore + upgradeabilityScore*w.upgradeabilityScore;
+  return { performanceScore, valueScore, marketScore, ragRelevanceScore, preferenceScore, upgradeabilityScore, totalScore };
 }
 
-export async function retrieveCandidatePools(request: BuildRequest, _sourceQuery = "", retrievalCategories: PartCategory[] = categories): Promise<{ pools: CandidatePools; chunks: RetrievedKnowledgeChunk[]; retrieval: RetrievalSummary }> {
+export async function retrieveCandidatePools(request: BuildRequest, _sourceQuery = "", retrievalCategories: PartCategory[] = categories): Promise<{ pools: CandidatePools; chunks: RetrievedKnowledgeChunk[]; retrieval: RetrievalSummary; marketSignals: Map<string, MarketSignal> }> {
+  const marketSignals = await getMarketSignals(parts, request.country);
+  const marketCatalog = parts.map(part => withMarketPrice(part, marketSignals.get(part.id)));
   const requested = new Set(retrievalCategories);
   const queryResults = await Promise.all(buildRetrievalQueries(request).filter(({ category }) => requested.has(category)).map(({ category, query }) => retrieveKnowledgeChunks(query, { tags: [category, request.useCase, request.resolution || ""].filter(Boolean), limit: 8 })));
   const unique = new Map<string, RetrievedKnowledgeChunk>();
@@ -99,7 +108,7 @@ export async function retrieveCandidatePools(request: BuildRequest, _sourceQuery
     return true;
   }).sort((a,b) => b.relevanceScore-a.relevanceScore).slice(0, 18);
   const pools = Object.fromEntries(categories.map(category => {
-    let eligible = parts.filter(part => part.category === category);
+    let eligible = marketCatalog.filter(part => part.category === category);
     if (category === "cpu" && request.preferredCpuBrand && request.preferredCpuBrand !== "none") eligible = eligible.filter(part => part.brand.toLowerCase() === request.preferredCpuBrand);
     if (category === "gpu" && request.preferredGpuBrand && request.preferredGpuBrand !== "none") eligible = eligible.filter(part => part.brand.toLowerCase() === request.preferredGpuBrand);
     const explicitVramMinimum = request.constraints?.some(item => item.target === "workloadTarget" && item.strength === "required" && /vram|显存/i.test(`${item.value} ${item.sourceText}`));
@@ -119,11 +128,42 @@ export async function retrieveCandidatePools(request: BuildRequest, _sourceQuery
       const nonRgbMatches = eligible.filter(part => !part.tags.includes("rgb"));
       if (nonRgbMatches.length) eligible = nonRgbMatches;
     }
-    const candidates: PartCandidate[] = eligible.map(part => {
+    const sffIsRequired = request.preferSmallFormFactor && request.constraints?.some(item => item.target === "formFactor" && item.value === "sff" && item.strength === "required");
+    if (sffIsRequired && category === "motherboard") eligible = eligible.filter(part => part.category === "motherboard" && part.formFactor === "Mini-ITX");
+    if (sffIsRequired && category === "case") eligible = eligible.filter(part => part.category === "case" && part.supportedMotherboardFormFactors.length === 1 && part.supportedMotherboardFormFactors[0] === "Mini-ITX");
+    if (sffIsRequired && category === "psu") eligible = eligible.filter(part => part.category === "psu" && part.formFactor === "SFX");
+    const caseStyleIsRequired = category === "case" && request.constraints?.some(item => item.target === "caseStyle" && item.value === request.preferredCaseStyle && item.strength === "required");
+    if (caseStyleIsRequired && request.preferredCaseStyle && request.preferredCaseStyle !== "none") {
+      const styleMatches = eligible.filter(part => part.category === "case" && part.tags.includes(request.preferredCaseStyle as string));
+      if (styleMatches.length) eligible = styleMatches;
+    }
+    // A confirmed out-of-stock SKU should not beat buyable or unknown-fallback
+    // candidates. Keep it only when the category would otherwise be too sparse.
+    const buyable = eligible.filter(part => marketSignals.get(part.id)?.availability !== "out_of_stock");
+    if (buyable.length >= 3) eligible = buyable;
+    const scored: PartCandidate[] = eligible.map(part => {
       const evidence = chunks.filter(chunk => chunk.partId === part.id || (!chunk.partId && (chunk.category === category || chunk.tags.includes(category))));
-      return { part, evidence: evidence.slice(0,3), score: scorePart(part, request, evidence) };
-    }).sort((a,b) => b.score.totalScore-a.score.totalScore).slice(0, category === "psu" ? 12 : 6);
+      const market = marketSignals.get(part.id)!;
+      return { part, market, evidence: evidence.slice(0,3), score: scorePart(part, request, evidence, market) };
+    }).sort((a,b) => b.score.totalScore-a.score.totalScore);
+    const limit = ({ cpu: 12, gpu: 12, motherboard: 24, ram: 16, storage: 16, cooler: 24, psu: 24, case: 24 } satisfies Record<PartCategory, number>)[category];
+    const selected = new Map(scored.slice(0, limit).map(candidate => [candidate.part.id, candidate]));
+    [...scored].sort((a, b) => priceIn(a.part, request.currency) - priceIn(b.part, request.currency)).slice(0, 8).forEach(candidate => selected.set(candidate.part.id, candidate));
+    if (category === "motherboard") {
+      const structural = new Set<string>();
+      for (const candidate of scored) {
+        const part = candidate.part;
+        if (part.category !== "motherboard") continue;
+        const key = `${part.socket}:${part.formFactor}`;
+        if (!structural.has(key)) { structural.add(key); selected.set(part.id, candidate); }
+      }
+    }
+    if (category === "psu") for (const form of ["ATX", "SFX"] as const) {
+      const candidate = scored.find(item => item.part.category === "psu" && item.part.formFactor === form);
+      if (candidate) selected.set(candidate.part.id, candidate);
+    }
+    const candidates = [...selected.values()].sort((a, b) => b.score.totalScore - a.score.totalScore);
     return [category, candidates];
   })) as CandidatePools;
-  return { pools, chunks, retrieval: summarizeRetrieval(chunks) };
+  return { pools, chunks, retrieval: summarizeRetrieval(chunks), marketSignals };
 }

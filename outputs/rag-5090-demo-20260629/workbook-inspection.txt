@@ -1,0 +1,33 @@
+{"kind":"workbook","id":"wb/a789iw","sheets":8}
+{"kind":"sheet","id":"ws/39fey9","name":"Executive Summary","index":0,"range":"A1:I20","address":"A1:I20","formulas":6}
+{"kind":"formula","sheet":"Executive Summary","address":"B5","formula":"=COUNTIF('Test Results'!$AB$6:$AB$15,\"PASS\")"}
+{"kind":"formula","sheet":"Executive Summary","address":"D5","formula":"=COUNTIF('Test Results'!$AB$6:$AB$15,\"WARNING\")"}
+{"kind":"formula","sheet":"Executive Summary","address":"F5","formula":"=COUNTIF('Test Results'!$AB$6:$AB$15,\"FAIL\")"}
+{"kind":"formula","sheet":"Executive Summary","address":"B6","formula":"=AVERAGE('Test Results'!$L$6:$L$15)"}
+{"kind":"formula","sheet":"Executive Summary","address":"D6","formula":"=COUNTIFS('Test Results'!$I$6:$I$15,\"vector\",'Test Results'!$J$6:$J$15,\"ollama\")/COUNTA('Test Results'!$A$6:$A$15)"}
+{"kind":"formula","sheet":"Executive Summary","address":"F6","formula":"=COUNTIF('Test Results'!$AA$6:$AA$15,\"*FAIL*\")"}
+{"kind":"sheet","id":"ws/ymsz1j","name":"Test Results","index":1,"range":"A1:AF15","address":"A1:AF15","formulas":10}
+{"kind":"formula","sheet":"Test Results","address":"P6","formula":"=IFERROR(O6/M6,0)"}
+{"kind":"formula","sheet":"Test Results","address":"P7","formula":"=IFERROR(O7/M7,0)"}
+{"kind":"formula","sheet":"Test Results","address":"P8","formula":"=IFERROR(O8/M8,0)"}
+{"kind":"formula","sheet":"Test Results","address":"P9","formula":"=IFERROR(O9/M9,0)"}
+{"kind":"formula","sheet":"Test Results","address":"P10","formula":"=IFERROR(O10/M10,0)"}
+{"kind":"formula","sheet":"Test Results","address":"P11","formula":"=IFERROR(O11/M11,0)"}
+{"kind":"formula","sheet":"Test Results","address":"P12","formula":"=IFERROR(O12/M12,0)"}
+{"kind":"formula","sheet":"Test Results","address":"P13","formula":"=IFERROR(O13/M13,0)"}
+{"kind":"formula","sheet":"Test Results","address":"P14","formula":"=IFERROR(O14/M14,0)"}
+{"kind":"formula","sheet":"Test Results","address":"P15","formula":"=IFERROR(O15/M15,0)"}
+{"kind":"sheet","id":"ws/fvqwrv","name":"Before vs After","index":2,"range":"A1:K15","address":"A1:K15"}
+{"kind":"sheet","id":"ws/zd3nvr","name":"Full Responses","index":3,"range":"A1:H15","address":"A1:H15"}
+{"kind":"sheet","id":"ws/hblcwo","name":"Evidence Audit","index":4,"range":"A1:N177","address":"A1:N177"}
+{"kind":"sheet","id":"ws/fn50th","name":"Parts Catalog","index":5,"range":"A1:M835","address":"A1:M835"}
+{"kind":"sheet","id":"ws/bz6e8r","name":"Field Audit","index":6,"range":"A1:H37","address":"A1:H37","formulas":8}
+{"kind":"formula","sheet":"Field Audit","address":"E9","formula":"=IF(B9>=D9,\"PASS\",\"FAIL\")"}
+{"kind":"formula","sheet":"Field Audit","address":"E10","formula":"=IF(B10>=D10,\"PASS\",\"FAIL\")"}
+{"kind":"formula","sheet":"Field Audit","address":"E11","formula":"=IF(B11>=D11,\"PASS\",\"FAIL\")"}
+{"kind":"formula","sheet":"Field Audit","address":"E12","formula":"=IF(B12>=D12,\"PASS\",\"FAIL\")"}
+{"kind":"formula","sheet":"Field Audit","address":"E13","formula":"=IF(B13>=D13,\"PASS\",\"FAIL\")"}
+{"kind":"formula","sheet":"Field Audit","address":"E14","formula":"=IF(B14>=D14,\"PASS\",\"FAIL\")"}
+{"kind":"formula","sheet":"Field Audit","address":"E15","formula":"=IF(B15>=D15,\"PASS\",\"FAIL\")"}
+{"kind":"formula","sheet":"Field Audit","address":"E16","formula":"=IF(B16>=D16,\"PASS\",\"FAIL\")"}
+{"kind":"sheet","id":"ws/ik8g5g","name":"Sources & Method","index":7,"range":"A1:F804","address":"A1:F804"}

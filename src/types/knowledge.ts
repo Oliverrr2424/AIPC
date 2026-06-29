@@ -1,6 +1,7 @@
 import type { BuildRecommendation, BuildRequest } from "./build";
 import type { Part, PartCategory } from "./parts";
 import type { AiModelId, ThinkingMode } from "./ai";
+import type { MarketSignal } from "./market";
 
 export interface KnowledgeChunk {
   id: string;
@@ -43,6 +44,7 @@ export interface CandidateScore {
   ragRelevanceScore: number;
   preferenceScore: number;
   upgradeabilityScore: number;
+  marketScore: number;
   totalScore: number;
 }
 
@@ -50,6 +52,7 @@ export interface PartCandidate {
   part: Part;
   score: CandidateScore;
   evidence: RetrievedKnowledgeChunk[];
+  market: MarketSignal;
 }
 
 export type CandidatePools = Record<PartCategory, PartCandidate[]>;

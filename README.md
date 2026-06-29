@@ -4,7 +4,8 @@ An explainable RAG-augmented PC recommendation system built with Next.js, React,
 
 ## What's new in Phase 1
 
-- **Live price data layer** with provider abstraction (BestBuy API + PCPartPicker fallback + list baseline)
+- **Market-aware decision layer** using current price, stock, freshness, 30-day trend, and explicit low-confidence catalog fallbacks
+- **400-part catalog** — 50 entries in each of eight categories, combining curated parts with an MIT-licensed structured dataset
 - **Historical price storage** — one `PriceSnapshot` row per (part, retailer, timestamp), powering the 30-day price chart
 - **Scheduled sync** — Vercel Cron triggers `/api/sync` at 06:00 & 18:00 UTC for prices, weekly for benchmarks
 - **Public benchmark database** — curated from TechPowerUp / Hardware Unboxed / Blender Open Data / llama.cpp
@@ -20,7 +21,8 @@ npm install
 cp .env.example .env.local          # fill in BESTBUY_API_KEY for live US prices (optional)
 npm run db:up                       # start local PostgreSQL + pgvector
 npm run db:migrate                  # create schema and HNSW vector index
-npm run db:seed                     # seed 54 parts + baseline prices + 69 benchmark rows
+npm run crawl:parts                 # refresh licensed catalog supplement (50/category)
+npm run db:seed                     # seed 400 parts + baseline prices + benchmarks
 npm run db:import-sqlite             # one-time import of legacy price history (optional)
 npm run rag:index                   # embed and index knowledge chunks
 npm run sync:prices                 # pull live prices from configured providers
@@ -50,7 +52,8 @@ flowchart TB
   subgraph Data["Data layer (Phase 1)"]
     DB[(PostgreSQL / pgvector / Prisma)]
     Embed["Multilingual E5 or Gemini\n384-dimensional embeddings"]
-    Prices["Price providers\nBestBuy · PCPartPicker · List"]
+    Prices["Price providers\nBestBuy API · licensed catalog · List"]
+    Market["Market signals\nstock · freshness · 30d trend"]
     Bench["Benchmark DB\nTechPowerUp · Blender · llama.cpp"]
     Cron["Vercel Cron\n06:00 & 18:00 UTC"]
   end
@@ -66,12 +69,13 @@ flowchart TB
   subgraph MCP["MCP server"]
     Tools["7 tools\nprice · compat · perf · sync"]
   end
-  Cron -->|GET /api/sync| Prices --> DB
+  Cron -->|GET /api/sync| Prices --> DB --> Market
   Intent --> Embed --> DB
   Cron --> Bench --> DB
   Bench --> Perf
   DB --> Perf
-  Intent --> Retrieve --> Build --> Perf --> Result
+  Intent --> Retrieve --> Build
+  Market --> Build --> Perf --> Result
   DB --> MCP
   Engine --> MCP
 ```
@@ -80,11 +84,12 @@ flowchart TB
 
 1. The selected DeepSeek V4 or Gemini model parses natural language into a structured `BuildRequest`, with a deterministic local fallback.
 2. The retrieval layer embeds each category-specific query, runs cosine similarity against a pgvector HNSW index, and applies tag/category filters. A visibly labeled keyword fallback is used only when semantic retrieval is unavailable.
-3. The candidate retriever builds a scored part pool for each category using performance, value, RAG relevance, preferences, and upgradeability.
+3. The candidate retriever builds a scored part pool using performance, value, RAG relevance, preferences, upgradeability, and a market score. The market score combines confirmed stock, quote freshness, 30-day price position/trend, region match, and confidence.
 4. The recommendation engine selects only from those pools. Gemini never invents the final hardware list.
 5. Deterministic rules validate socket, memory type, PSU headroom, clearances, cooler height, and motherboard form factor.
 6. `performanceEstimator` now pulls **real benchmark rows** from the DB (FPS, token/s, render seconds) and falls back to relative tiers only when no data exists.
-7. The selected model explains the final build using retrieved evidence citations. It is explicitly prohibited from inventing prices, benchmarks, or inventory.
+7. Budget optimization and displayed totals use the selected market quote. Confirmed out-of-stock SKUs are excluded when alternatives exist; missing or stale coverage falls back to catalog price with an explicit confidence penalty.
+8. The selected model explains the final build using retrieved evidence citations. It is explicitly prohibited from inventing prices, benchmarks, or inventory.
 
 ## Environment
 
@@ -97,7 +102,8 @@ Copy `.env.example` to `.env.local`:
 | `LOCAL_EMBEDDING_MODEL` | Transformers.js embedding model, default `Xenova/multilingual-e5-small`. | local RAG |
 | `HF_ENDPOINT` | Hugging Face model host used for the initial local model download. | no |
 | `EMBEDDING_MODEL` | Gemini embedding model when provider is `gemini`. | Gemini RAG |
-| `BESTBUY_API_KEY` | BestBuy official Products API (US prices). Without it, falls back to PCPartPicker + list prices. | no |
+| `BESTBUY_API_KEY` | BestBuy official Products API (US prices). Without it, the engine uses explicitly marked catalog-price fallbacks. | no |
+| `ENABLE_PCPARTPICKER_SCRAPE` | Off by default. Opt in only after confirming the intended use is permitted by the source's current policy. | no |
 | `DEEPSEEK_API_KEY` | DeepSeek V4 for intent parsing + explanation. | no |
 | `GEMINI_API_KEY` | Gemini 2.5 Flash as alternate AI provider. | no |
 | `SYNC_API_TOKEN` | Bearer token protecting `/api/sync`. Open in dev, required in prod. | prod |
@@ -137,6 +143,7 @@ npm run rag:index          # embed knowledge chunks into pgvector
 npm run rag:eval           # semantic retrieval regression set
 npm run sync:prices        # live price refresh
 npm run sync:benchmarks    # load curated benchmark data
+npm run crawl:parts        # refresh the MIT-licensed 50/category catalog supplement
 npm run sync:all           # seed + RAG index + prices + benchmarks
 ```
 
@@ -145,7 +152,7 @@ npm run sync:all           # seed + RAG index + prices + benchmarks
 | Source | What it provides | Region |
 |--------|------------------|--------|
 | [BestBuy API](https://developer.bestbuy.com) | Live US retail prices + stock | US |
-| [PCPartPicker](https://pcpartpicker.com) | Aggregated US/CA prices (fallback) | US/CA |
+| [Doshiba/pcpartpicker-parts-dataset](https://huggingface.co/datasets/Doshiba/pcpartpicker-parts-dataset) | MIT-licensed structured catalog/specifications; EUR reference prices converted with ECB reference data | global |
 | [TechPowerUp](https://www.techpowerup.com/reviews) | GPU/CPU FPS + Cinebench scores | global |
 | [Hardware Unboxed](https://www.youtube.com/@HardwareUnboxed) | AMD GPU FPS reviews | global |
 | [Blender Open Data](https://opendata.blender.org) | Blender Classroom render seconds | global |
