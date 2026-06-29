@@ -21,6 +21,11 @@
     "rag:eval": "DATABASE_URL=${DATABASE_URL:-postgresql://aipc:aipc@localhost:5432/aipc?schema=public} tsx scripts/rag-retrieval-eval.ts",
     "sync:prices": "DATABASE_URL=${DATABASE_URL:-postgresql://aipc:aipc@localhost:5432/aipc?schema=public} tsx scripts/sync-prices.ts",
     "sync:benchmarks": "DATABASE_URL=${DATABASE_URL:-postgresql://aipc:aipc@localhost:5432/aipc?schema=public} tsx scripts/sync-benchmarks.ts",
+    "crawl:parts": "node scripts/crawl-parts.mjs --target 50",
+    "crawl:ca": "node scripts/ca-crawl/crawl.mjs",
+    "crawl:ca:normalize": "node scripts/ca-crawl/normalize.mjs",
+    "import:ca": "DATABASE_URL=${DATABASE_URL:-postgresql://aipc:aipc@localhost:5432/aipc?schema=public} tsx scripts/import-ca-prices.ts",
+    "audit:parts": "tsx scripts/audit-parts-data.ts",
     "sync:all": "npm run db:seed && npm run rag:index && npm run sync:prices && npm run sync:benchmarks"
   },
   "dependencies": {
@@ -40,6 +45,7 @@
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
     "autoprefixer": "^10.4.21",
+    "playwright": "^1.61.1",
     "postcss": "^8.5.15",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.19.2",

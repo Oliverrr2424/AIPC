@@ -1,0 +1,73 @@
+{
+  "generatedAt": "2026-06-29T06:43:05.939Z",
+  "fx": {
+    "rate": 0.70511,
+    "date": "2026-06-26",
+    "source": "https://api.frankfurter.app (ECB reference data)"
+  },
+  "perCategory": {
+    "case": {
+      "newParts": 45,
+      "snapshots": 47,
+      "curatedMatched": 0
+    },
+    "cooler": {
+      "newParts": 40,
+      "snapshots": 42,
+      "curatedMatched": 0
+    },
+    "cpu": {
+      "newParts": 25,
+      "snapshots": 26,
+      "curatedMatched": 0
+    },
+    "gpu": {
+      "newParts": 41,
+      "snapshots": 44,
+      "curatedMatched": 0
+    },
+    "motherboard": {
+      "newParts": 78,
+      "snapshots": 78,
+      "curatedMatched": 0
+    },
+    "psu": {
+      "newParts": 46,
+      "snapshots": 46,
+      "curatedMatched": 0
+    },
+    "ram": {
+      "newParts": 78,
+      "snapshots": 81,
+      "curatedMatched": 0
+    },
+    "storage": {
+      "newParts": 77,
+      "snapshots": 80,
+      "curatedMatched": 0
+    }
+  },
+  "dedup": {
+    "curatedMatched": 0,
+    "newParts": 430,
+    "snapshots": 444,
+    "skippedUnpriced": 0,
+    "duplicateMerged": 14,
+    "skippedByReason": {
+      "not-pc-case": 19,
+      "not-desktop-cooler": 15,
+      "combo-or-bundle": 30,
+      "not-desktop-cpu": 4,
+      "complete-system": 46,
+      "price-outlier": 3,
+      "not-graphics-card": 17,
+      "unsupported-eatx": 4,
+      "not-power-supply": 34,
+      "non-new-condition": 21,
+      "not-processor-listing": 1,
+      "not-target-gpu": 2,
+      "non-desktop-memory": 1,
+      "not-internal-ssd": 1
+    }
+  }
+}

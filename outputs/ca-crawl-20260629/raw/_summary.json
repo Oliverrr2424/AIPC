@@ -1,0 +1,57 @@
+{
+  "generatedAt": "2026-06-29T04:56:58.540Z",
+  "retailers": {
+    "newegg": {
+      "products": 442,
+      "blocks": 0,
+      "errors": 0
+    },
+    "canadacomputers": {
+      "products": 200,
+      "blocks": 0,
+      "errors": 0
+    }
+  },
+  "categories": {
+    "cpu": {
+      "newegg": 60,
+      "canadacomputers": 25,
+      "total": 85
+    },
+    "gpu": {
+      "newegg": 60,
+      "canadacomputers": 25,
+      "total": 85
+    },
+    "motherboard": {
+      "newegg": 60,
+      "canadacomputers": 25,
+      "total": 85
+    },
+    "ram": {
+      "newegg": 60,
+      "canadacomputers": 25,
+      "total": 85
+    },
+    "storage": {
+      "newegg": 60,
+      "canadacomputers": 25,
+      "total": 85
+    },
+    "cooler": {
+      "newegg": 39,
+      "canadacomputers": 25,
+      "total": 64
+    },
+    "psu": {
+      "newegg": 60,
+      "canadacomputers": 25,
+      "total": 85
+    },
+    "case": {
+      "newegg": 43,
+      "canadacomputers": 25,
+      "total": 68
+    }
+  }
+}

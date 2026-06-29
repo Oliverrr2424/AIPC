@@ -4,6 +4,7 @@ import { generateModelJson, generateModelText } from "@/lib/ai/modelGateway";
 import { checkCompatibility, estimateWattage } from "@/lib/compatibility/compatibilityChecker";
 import { estimatePerformance } from "@/lib/performance/performanceEstimator";
 import { priceIn } from "@/lib/pricing/priceEstimator";
+import { marketRegion, summarizeBuildMarket, withMarketPrice } from "@/lib/pricing/marketSignals";
 import type { AiGenerationOptions } from "@/types/ai";
 import type { BuildRequest, InterpretedConstraint } from "@/types/build";
 import type { AgentContextMessage, AgentInteraction, AgentTokenUsage, BuildPartChange, BuildTurnAction, CandidatePools, RagBuildRecommendation } from "@/types/knowledge";
@@ -89,7 +90,7 @@ function exactPartFromQuery(query: string) {
     }
     return false;
   });
-  return matches.sort((a, b) => b.name.length - a.name.length)[0];
+  return matches.sort((a, b) => (a.id.startsWith("ca-") ? 1 : 0) - (b.id.startsWith("ca-") ? 1 : 0) || b.name.length - a.name.length)[0];
 }
 
 function explicitBudget(query: string) {
@@ -265,7 +266,7 @@ function repairCategoryForFailure(id: string, direct: Set<PartCategory>): PartCa
   return undefined;
 }
 
-function repairCompatibility(build: BuildParts, request: BuildRequest, direct: Set<PartCategory>) {
+function repairCompatibility(build: BuildParts, request: BuildRequest, direct: Set<PartCategory>, marketCatalog: Part[]) {
   let next = build;
   const induced = new Set<PartCategory>();
   for (let pass = 0; pass < 10; pass++) {
@@ -273,7 +274,7 @@ function repairCompatibility(build: BuildParts, request: BuildRequest, direct: S
     if (!failure) break;
     const category = repairCategoryForFailure(failure.id, direct);
     if (!category) break;
-    const candidates = partsByCategory(category).filter(part => {
+    const candidates = marketCatalog.filter(part => part.category === category).filter(part => {
       if (category === "cpu" && request.preferredCpuBrand !== "none" && part.brand.toLowerCase() !== request.preferredCpuBrand) return false;
       if (category === "gpu" && request.preferredGpuBrand !== "none" && part.brand.toLowerCase() !== request.preferredGpuBrand) return false;
       if (part.category === "cooler" && request.preferredCooling !== "none" && part.type !== request.preferredCooling) return false;
@@ -314,7 +315,7 @@ function economyPerformance(part: Part, request: BuildRequest) {
   }
 }
 
-function optimizeCheaper(initial: BuildParts, request: BuildRequest) {
+function optimizeCheaper(initial: BuildParts, request: BuildRequest, marketCatalog: Part[]) {
   let build = initial;
   const changed = new Set<PartCategory>();
   const initialTotal = categories.reduce((sum, category) => sum + priceIn(initial[category], request.currency), 0);
@@ -324,7 +325,7 @@ function optimizeCheaper(initial: BuildParts, request: BuildRequest) {
     const moves = adjustable.flatMap(category => {
       if (changed.has(category)) return [];
       const current = build[category];
-      return partsByCategory(category).filter(part => allowedByHardConstraints(part, request)).flatMap(part => {
+      return marketCatalog.filter(part => part.category === category).filter(part => allowedByHardConstraints(part, request)).flatMap(part => {
         const saving = priceIn(current, request.currency) - priceIn(part, request.currency);
         if (saving <= 0) return [];
         const candidate = replacePart(build, category, part);
@@ -408,16 +409,21 @@ export async function reviseRagBuild(query: string, current: RagBuildRecommendat
     return withInteraction(rebuilt, { action: "rebuild", message, changedParts: changes, preservedCategories: categories.filter(category => current.parts[category].id === rebuilt.parts[category].id), affectedCategories: categories, context: nextContext(context, userContent, decision.raw || JSON.stringify({ action: "rebuild", changed: changes.map(change => change.category) })), tokenUsage: decision.usage });
   }
 
-  const { pools, chunks } = await retrieveCandidatePools(request, query, decision.action === "optimize" ? [] : decision.affectedCategories);
+  const { pools, chunks, marketSignals } = await retrieveCandidatePools(request, query, decision.action === "optimize" ? [] : decision.affectedCategories);
+  const marketCatalog = parts.map(part => withMarketPrice(part, marketSignals.get(part.id)));
   let direct = new Set(decision.affectedCategories);
-  let nextParts = { ...current.parts } as BuildParts;
+  let nextParts = Object.fromEntries(categories.map(category => [category, withMarketPrice(current.parts[category], marketSignals.get(current.parts[category].id))])) as unknown as BuildParts;
   if (decision.action === "optimize") {
-    const optimized = optimizeCheaper(nextParts, request);
+    const optimized = optimizeCheaper(nextParts, request, marketCatalog);
     nextParts = optimized.parts;
     direct = optimized.direct;
   } else {
-    const exact = decision.exactPartId ? partById(decision.exactPartId) : undefined;
-    const targetByCategory = new Map((decision.targetParts || []).map(target => [target.category, partById(target.partId)]));
+    const exactBase = decision.exactPartId ? partById(decision.exactPartId) : undefined;
+    const exact = exactBase ? withMarketPrice(exactBase, marketSignals.get(exactBase.id)) : undefined;
+    const targetByCategory = new Map((decision.targetParts || []).map(target => {
+      const base = partById(target.partId);
+      return [target.category, base ? withMarketPrice(base, marketSignals.get(base.id)) : undefined] as const;
+    }));
     const ordered: PartCategory[] = ["cpu", "gpu", "motherboard", "ram", "case", "cooler", "psu", "storage"];
     for (const category of ordered.filter(item => direct.has(item))) {
       const target = targetByCategory.get(category);
@@ -426,7 +432,7 @@ export async function reviseRagBuild(query: string, current: RagBuildRecommendat
       else nextParts = replacePart(nextParts, category, chooseDirectReplacement(category, nextParts, pools, decision));
     }
   }
-  const repaired = repairCompatibility(nextParts, request, direct);
+  const repaired = repairCompatibility(nextParts, request, direct, marketCatalog);
   nextParts = repaired.parts;
   const changes = changesBetween(current.parts, nextParts, repaired.induced, decision.reason);
   const totalPrice = categories.reduce((sum, category) => sum + priceIn(nextParts[category], request.currency), 0);
@@ -438,7 +444,8 @@ export async function reviseRagBuild(query: string, current: RagBuildRecommendat
     if (!changed) return item;
     const part = nextParts[item.category];
     const candidate = pools[item.category].find(entry => entry.part.id === part.id);
-    return { category: item.category, considered: pools[item.category].slice(0, 4).map(entry => entry.part.name), selected: part.name, reason: changed.reason, evidenceIds: candidate?.evidence.map(entry => entry.id) || [] };
+    const marketReason = candidate ? ` ${candidate.market.availability.replace("_", " ")}; ${candidate.market.usedFallback ? "catalog fallback" : `${candidate.market.retailer} price`}.` : "";
+    return { category: item.category, considered: pools[item.category].slice(0, 4).map(entry => entry.part.name), selected: part.name, reason: `${changed.reason}${marketReason}`, evidenceIds: candidate?.evidence.map(entry => entry.id) || [] };
   });
   const mergedChunks = [...chunks, ...current.retrievedChunks].filter((chunk, index, all) => all.findIndex(item => item.id === chunk.id) === index).slice(0, 18);
   const message = interactionMessage(decision.action, changes);
@@ -453,6 +460,6 @@ export async function reviseRagBuild(query: string, current: RagBuildRecommendat
     ...current, id: `rag-${Date.now().toString(36)}`, request, parts: nextParts, totalPrice, compatibility, performance,
     estimatedWattage: estimateWattage(nextParts), generatedAt: new Date().toISOString(), retrievedChunks: mergedChunks,
     retrieval: summarizeRetrieval(mergedChunks),
-    reasoning, alternativeBuilds: [], interaction,
+    reasoning, alternativeBuilds: [], interaction, market: summarizeBuildMarket(Object.values(nextParts), marketSignals, marketRegion(request.country)),
   };
 }

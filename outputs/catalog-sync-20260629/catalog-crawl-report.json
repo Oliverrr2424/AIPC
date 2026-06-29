@@ -1,0 +1,88 @@
+{
+  "generatedAt": "2026-06-28T19:00:58.597Z",
+  "targetPerCategory": 50,
+  "output": "D:\\AIPC\\src\\data\\crawledParts.json",
+  "source": {
+    "dataset": "Doshiba/pcpartpicker-parts-dataset",
+    "api": "https://datasets-server.huggingface.co",
+    "license": "MIT",
+    "datasetUrl": "https://huggingface.co/datasets/Doshiba/pcpartpicker-parts-dataset"
+  },
+  "pricing": {
+    "originalCurrency": "EUR",
+    "outputCurrency": "USD",
+    "eurUsdRate": 1.1401,
+    "rateDate": "2026-06-26",
+    "rateSource": "https://api.frankfurter.app (ECB reference data)"
+  },
+  "policy": {
+    "retailerHtmlScraped": false,
+    "selection": "priced rows ordered by rating_count descending",
+    "deduplication": "normalized brand/model name"
+  },
+  "derivedFields": [
+    "cpu.threads",
+    "relative performance scores",
+    "fallback sockets/clearances",
+    "cooler TDP rating",
+    "storage throughput when omitted"
+  ],
+  "categories": {
+    "cpu": {
+      "curated": 14,
+      "added": 36,
+      "final": 50,
+      "scanned": 41,
+      "sourceRows": 334
+    },
+    "gpu": {
+      "curated": 19,
+      "added": 31,
+      "final": 50,
+      "scanned": 45,
+      "sourceRows": 758
+    },
+    "motherboard": {
+      "curated": 12,
+      "added": 38,
+      "final": 50,
+      "scanned": 39,
+      "sourceRows": 719
+    },
+    "ram": {
+      "curated": 8,
+      "added": 42,
+      "final": 50,
+      "scanned": 84,
+      "sourceRows": 1809
+    },
+    "storage": {
+      "curated": 7,
+      "added": 43,
+      "final": 50,
+      "scanned": 109,
+      "sourceRows": 1548
+    },
+    "cooler": {
+      "curated": 8,
+      "added": 42,
+      "final": 50,
+      "scanned": 45,
+      "sourceRows": 967
+    },
+    "psu": {
+      "curated": 12,
+      "added": 38,
+      "final": 50,
+      "scanned": 38,
+      "sourceRows": 612
+    },
+    "case": {
+      "curated": 11,
+      "added": 39,
+      "final": 50,
+      "scanned": 51,
+      "sourceRows": 1514
+    }
+  }
+}

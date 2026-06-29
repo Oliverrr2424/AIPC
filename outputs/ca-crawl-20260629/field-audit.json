@@ -1,0 +1,20 @@
+{
+  "generatedAt": "2026-06-29T06:43:09.185Z",
+  "summary": {
+    "totalParts": 830,
+    "caParts": 430,
+    "counts": {
+      "cpu": 75,
+      "gpu": 91,
+      "motherboard": 128,
+      "ram": 128,
+      "storage": 127,
+      "cooler": 90,
+      "psu": 96,
+      "case": 95
+    },
+    "errors": 0,
+    "warnings": 0
+  },
+  "findings": []
+}

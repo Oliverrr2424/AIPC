@@ -21,7 +21,8 @@ function pickProviders(): PriceProvider[] {
   const list: PriceProvider[] = [];
   const bb = new BestBuyProvider();
   if (bb.isConfigured()) list.push(bb);
-  list.push(new PCPartPickerProvider()); // fallback (no key needed)
+  const pcpp = new PCPartPickerProvider();
+  if (pcpp.isConfigured()) list.push(pcpp);
   list.push(new ListPriceProvider());    // last-resort baseline
   return list;
 }
