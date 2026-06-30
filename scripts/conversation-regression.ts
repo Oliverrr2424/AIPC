@@ -18,7 +18,7 @@ assert(gpuEdit.parts.gpu.id === "gpu-5090", "an explicit RTX 5090 edit must be h
 assert(gpuEdit.parts.cpu.id === baseline.parts.cpu.id && gpuEdit.parts.motherboard.id === baseline.parts.motherboard.id, "a GPU edit must preserve unrelated CPU and motherboard choices");
 assert(gpuEdit.interaction?.changedParts.some(change => change.category === "gpu" && !change.inducedByCompatibility), "the GPU must be marked as the direct change");
 assert(gpuEdit.interaction?.changedParts.filter(change => change.inducedByCompatibility).every(change => change.category === "psu" || change.category === "case"), "only physical or power dependencies may follow a GPU edit");
-assert(gpuEdit.compatibility.every(result => result.status !== "FAIL"), "the edited GPU build must remain compatible");
+assert(gpuEdit.compatibility.every(result => result.status !== "FAIL"), `the edited GPU build must remain compatible: ${gpuEdit.compatibility.filter(result => result.status === "FAIL").map(result => `${result.rule}: ${result.message}`).join("; ")}`);
 
 const airEdit = await reviseRagBuild("不要水冷", gpuEdit, ai);
 assert(airEdit.parts.cooler.type === "air", "no-liquid-cooling must select an air cooler");

@@ -1,12 +1,14 @@
 import { parts } from "@/data/parts";
 import { priceIn } from "@/lib/pricing/priceEstimator";
-import { getMarketSignals, withMarketPrice } from "@/lib/pricing/marketSignals";
+import { getMarketSignals, isPartEligibleForRegion, marketRegion, withMarketPrice } from "@/lib/pricing/marketSignals";
 import type { BuildRequest } from "@/types/build";
 import type { Part, PartCategory } from "@/types/parts";
 import type { CandidatePools, CandidateScore, PartCandidate, RetrievalSummary, RetrievedKnowledgeChunk } from "@/types/knowledge";
 import type { MarketSignal } from "@/types/market";
 import { retrieveKnowledgeChunks, summarizeRetrieval } from "./retrieval";
 import { ConstraintConflictError, type CategoryConflict, type ConflictingConstraint } from "./constraintConflict";
+import { capabilityScore } from "./utilityModel";
+import { isCatalogPartSelectable } from "@/lib/catalog/catalogQuality";
 
 const categories: PartCategory[] = ["cpu", "gpu", "motherboard", "ram", "storage", "cooler", "psu", "case"];
 
@@ -58,23 +60,7 @@ export function buildRetrievalQueries(request: BuildRequest) {
 }
 
 function performance(part: Part, request: BuildRequest) {
-  switch (part.category) {
-    case "gpu": return request.useCase === "ai" ? Math.min(100, part.aiScore + (part.cuda ? 8 : -12) + (part.vramGb >= (request.vramPreference || 12) ? 8 : -15)) : request.resolution === "4k" ? part.gamingScore4k : request.resolution === "1080p" ? part.gamingScore1080p : part.gamingScore1440p;
-    case "cpu": return request.useCase === "gaming" ? part.gamingScore : part.productivityScore;
-    case "motherboard": return Math.min(100, 48 + part.m2Slots * 9 + part.maxMemoryGb / 8);
-    case "ram": return Math.min(100, part.capacityGb * (request.useCase === "gaming" ? 1.8 : 1.2) + part.speedMt / 300);
-    case "storage": return Math.min(100, part.capacityTb * 20 + (part.readSpeedMb || 500) / 100);
-    // A cooler's merit is thermal headroom over the CPU, but capacity past ~250W
-    // is irrelevant; do not let a 420mm AIO outscore an adequate tower on size.
-    case "cooler": return Math.min(100, 45 + Math.min(part.tdpRatingWatts, 250) / 5);
-    // PSU "performance" is efficiency/quality, NOT raw wattage. Headroom is
-    // rewarded by the upgradeability dimension and enforced at assembly time,
-    // so we no longer bias the pool toward oversized supplies.
-    case "psu": return part.efficiency === "Titanium" ? 95 : part.efficiency === "Platinum" ? 88 : part.efficiency === "Gold" ? 78 : 60;
-    // Case "performance" is airflow/acoustics, NOT physical size. Clearance is a
-    // hard compatibility check, not a score, so a huge case earns nothing extra.
-    case "case": return Math.min(100, 62 + (part.tags.includes("airflow") ? 18 : 0) + (part.tags.includes("quiet") ? 8 : 0));
-  }
+  return capabilityScore(part, request);
 }
 
 function preference(part: Part, request: BuildRequest) {
@@ -93,14 +79,19 @@ function preference(part: Part, request: BuildRequest) {
   if (request.preferSmallFormFactor) score += (part.category === "case" && part.supportedMotherboardFormFactors.length === 1 && part.supportedMotherboardFormFactors[0] === "Mini-ITX") || (part.category === "motherboard" && part.formFactor === "Mini-ITX") || (part.category === "psu" && part.formFactor === "SFX") ? 45 : part.category === "case" || part.category === "motherboard" || part.category === "psu" ? -40 : 0;
   if (request.preferQuiet && part.tags.includes("quiet")) score += 25;
   if (request.preferLowPower && ((part.category === "cpu" && part.tdpWatts <= 65) || (part.category === "gpu" && part.tdpWatts <= 220))) score += 30;
+  if (request.preferReliability) {
+    if (part.category === "ram") score += part.sticks === 2 ? 18 : part.sticks >= 4 ? -18 : 0;
+    if (part.category === "storage") score += part.tbw != null && part.warrantyYears != null ? 18 : part.nandType === "QLC" ? -8 : 0;
+    if (part.category === "psu") score += part.atxVersion && (part.pcie8PinConnectors != null || part.twelveV2x6Connectors != null) ? 15 : 0;
+  }
   return Math.max(0, Math.min(100, score));
 }
 
 function upgradeability(part: Part) {
   if (part.category === "cpu") return part.socket === "AM5" ? 95 : 50;
   if (part.category === "motherboard") return Math.min(100, 45 + part.m2Slots * 10 + part.maxMemoryGb / 8 + (part.socket === "AM5" ? 15 : 0));
-  if (part.category === "psu") return Math.min(100, part.wattage / 10);
-  if (part.category === "case") return Math.min(100, part.maxGpuLengthMm / 4.5);
+  if (part.category === "psu") return part.atxVersion === "3.1" ? 92 : part.atxVersion === "3.0" ? 80 : 55;
+  if (part.category === "case") return Math.min(100, 55 + (part.supportedRadiatorSizesMm?.length || 0) * 5 + (part.maxPsuLengthMm ? 10 : 0));
   if (part.category === "ram") return part.sticks === 2 ? 80 : 45;
   return 60;
 }
@@ -161,27 +152,16 @@ function evidenceScoreOf(evidence: RetrievedKnowledgeChunk[]): number {
   return evidence.length ? Math.max(...evidence.map(e => e.relevanceScore)) : 50;
 }
 
-// Whole-build optimizer weights = per-category weights with the value
-// (cheaper-is-better) term removed and the remaining five renormalized to 1.
-// In the global optimizer, price is a hard budget CONSTRAINT, not a reward, so
-// rewarding cheapness inside the objective would fight against spending the
-// budget on capability. The objective should rank capability/quality only.
-const optimizerWeights: Record<PartCategory, ScoreWeights> = Object.fromEntries(categories.map(category => {
-  const w = categoryWeights[category];
-  const keep = { performanceScore: w.performanceScore, marketScore: w.marketScore, preferenceScore: w.preferenceScore, upgradeabilityScore: w.upgradeabilityScore, ragRelevanceScore: w.ragRelevanceScore };
-  const sum = keep.performanceScore + keep.marketScore + keep.preferenceScore + keep.upgradeabilityScore + keep.ragRelevanceScore;
-  return [category, { performanceScore: keep.performanceScore / sum, valueScore: 0, marketScore: keep.marketScore / sum, preferenceScore: keep.preferenceScore / sum, upgradeabilityScore: keep.upgradeabilityScore / sum, ragRelevanceScore: keep.ragRelevanceScore / sum }];
-})) as Record<PartCategory, ScoreWeights>;
-
 // Capability/quality utility of a single part for the whole-build optimizer.
 // Excludes price entirely — the optimizer maximizes this subject to the budget.
 export function scorePartForOptimizer(part: Part, request: BuildRequest, category: PartCategory, chunks: RetrievedKnowledgeChunk[], market: MarketSignal): number {
-  const w = optimizerWeights[category];
-  return performance(part, request) * w.performanceScore
-    + market.marketScore * w.marketScore
-    + preference(part, request) * w.preferenceScore
-    + upgradeability(part) * w.upgradeabilityScore
-    + evidenceScoreOf(evidenceFor(part, category, chunks)) * w.ragRelevanceScore;
+  // This is a local 0..100 score. Cross-category importance and price
+  // opportunity are applied once, at whole-build level, by buildOptimizer.
+  return performance(part, request) * .72
+    + market.marketScore * .12
+    + preference(part, request) * .09
+    + upgradeability(part) * .04
+    + evidenceScoreOf(evidenceFor(part, category, chunks)) * .03;
 }
 
 // Full per-part score for display/reasoning of parts that were not part of a
@@ -201,7 +181,8 @@ function applyRequired(eligible: Part[], predicate: (part: Part) => boolean, con
 
 export async function retrieveCandidatePools(request: BuildRequest, _sourceQuery = "", retrievalCategories: PartCategory[] = categories): Promise<{ pools: CandidatePools; chunks: RetrievedKnowledgeChunk[]; retrieval: RetrievalSummary; marketSignals: Map<string, MarketSignal> }> {
   const marketSignals = await getMarketSignals(parts, request.country);
-  const marketCatalog = parts.map(part => withMarketPrice(part, marketSignals.get(part.id)));
+  const requestedRegion = marketRegion(request.country);
+  const marketCatalog = parts.filter(part => isPartEligibleForRegion(part, requestedRegion) && isCatalogPartSelectable(part)).map(part => withMarketPrice(part, marketSignals.get(part.id)));
   const requested = new Set(retrievalCategories);
   const queryResults = await Promise.all(buildRetrievalQueries(request).filter(({ category }) => requested.has(category)).map(({ category, query }) => retrieveKnowledgeChunks(query, { tags: [category, request.useCase, request.resolution || ""].filter(Boolean), limit: 8 })));
   const unique = new Map<string, RetrievedKnowledgeChunk>();

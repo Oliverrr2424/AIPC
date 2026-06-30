@@ -4,7 +4,7 @@ import { generateModelJson, generateModelText } from "@/lib/ai/modelGateway";
 import { checkCompatibility, estimateWattage } from "@/lib/compatibility/compatibilityChecker";
 import { estimatePerformance } from "@/lib/performance/performanceEstimator";
 import { priceIn } from "@/lib/pricing/priceEstimator";
-import { marketRegion, summarizeBuildMarket, withMarketPrice } from "@/lib/pricing/marketSignals";
+import { isPartEligibleForRegion, marketRegion, summarizeBuildMarket, withMarketPrice } from "@/lib/pricing/marketSignals";
 import type { AiGenerationOptions } from "@/types/ai";
 import type { BuildRequest, InterpretedConstraint } from "@/types/build";
 import type { AgentContextMessage, AgentInteraction, AgentTokenUsage, BuildPartChange, BuildTurnAction, CandidatePools, RagBuildRecommendation } from "@/types/knowledge";
@@ -12,6 +12,9 @@ import type { BuildParts, Part, PartCategory } from "@/types/parts";
 import { retrieveCandidatePools } from "./candidateRetriever";
 import { summarizeRetrieval } from "./retrieval";
 import { generateRagBuildFromRequest } from "./ragBuildGenerator";
+import { generateRagExplanation } from "./ragExplanation";
+import { capabilityScore } from "./utilityModel";
+import { isCatalogPartSelectable } from "@/lib/catalog/catalogQuality";
 
 const categories: PartCategory[] = ["cpu", "gpu", "motherboard", "ram", "storage", "cooler", "psu", "case"];
 const visibleCategories: PartCategory[] = ["gpu", "motherboard", "ram", "cooler", "psu", "case"];
@@ -372,12 +375,15 @@ function chooseDirectReplacement(category: PartCategory, build: BuildParts, pool
 
 function repairCategoryForFailure(id: string, direct: Set<PartCategory>): PartCategory | undefined {
   if (id === "socket") return direct.has("motherboard") ? "cpu" : "motherboard";
-  if (id === "memory") return "ram";
+  if (id === "cpu-support") return "motherboard";
+  if (id === "memory" || id === "cpu-memory" || id === "memory-slots" || id === "memory-capacity") return "ram";
   if (id === "form") return direct.has("case") ? "motherboard" : "case";
-  if (id === "gpu-length") return "case";
-  if (id === "cooler-height") return direct.has("cooler") ? "case" : "cooler";
+  if (id === "gpu-length" || id === "gpu-thickness") return "case";
+  if (id === "cooler-clearance") return direct.has("cooler") ? "case" : "cooler";
+  if (id === "cooler-socket") return "cooler";
   if (id === "cooling") return direct.has("cooler") ? "cpu" : "cooler";
-  if (id === "power" || id === "psu-form") return "psu";
+  if (id === "power" || id === "gpu-power-connector" || id === "psu-form") return "psu";
+  if (id === "psu-length") return direct.has("psu") ? "case" : "psu";
   if (id === "storage") return "storage";
   return undefined;
 }
@@ -388,14 +394,25 @@ function repairCompatibility(build: BuildParts, request: BuildRequest, direct: S
   for (let pass = 0; pass < 10; pass++) {
     const failure = checkCompatibility(next).find(result => result.status === "FAIL");
     if (!failure) break;
+    if (failure.id === "power" || failure.id === "gpu-power-connector" || failure.id === "psu-form" || failure.id === "psu-length") {
+      const currentFailures = failCount(next);
+      const psuCandidates = marketCatalog.filter((part): part is BuildParts["psu"] => part.category === "psu" && allowedByHardConstraints(part, request));
+      const caseCandidates = [next.case, ...marketCatalog.filter((part): part is BuildParts["case"] => part.category === "case" && part.id !== next.case.id && allowedByHardConstraints(part, request))];
+      const paired = psuCandidates.flatMap(psu => caseCandidates.map(pcCase => ({
+        psu, pcCase, build: { ...next, psu, case: pcCase } as BuildParts,
+      }))).filter(candidate => failCount(candidate.build) < currentFailures)
+        .sort((a, b) => failCount(a.build) - failCount(b.build)
+          || (priceIn(a.psu, request.currency) + priceIn(a.pcCase, request.currency)) - (priceIn(b.psu, request.currency) + priceIn(b.pcCase, request.currency)))[0];
+      if (paired) {
+        if (paired.psu.id !== next.psu.id && !direct.has("psu")) induced.add("psu");
+        if (paired.pcCase.id !== next.case.id && !direct.has("case")) induced.add("case");
+        next = paired.build;
+        continue;
+      }
+    }
     const category = repairCategoryForFailure(failure.id, direct);
     if (!category) break;
-    const candidates = marketCatalog.filter(part => part.category === category).filter(part => {
-      if (category === "cpu" && request.preferredCpuBrand !== "none" && part.brand.toLowerCase() !== request.preferredCpuBrand) return false;
-      if (category === "gpu" && request.preferredGpuBrand !== "none" && part.brand.toLowerCase() !== request.preferredGpuBrand) return false;
-      if (part.category === "cooler" && request.preferredCooling !== "none" && part.type !== request.preferredCooling) return false;
-      return true;
-    }).map(part => ({ part, build: replacePart(next, category, part) }))
+    const candidates = marketCatalog.filter(part => part.category === category).filter(part => allowedByHardConstraints(part, request)).map(part => ({ part, build: replacePart(next, category, part) }))
       .sort((a, b) => failCount(a.build) - failCount(b.build) || priceIn(a.part, request.currency) - priceIn(b.part, request.currency));
     const replacement = candidates.find(candidate => failCount(candidate.build) < failCount(next));
     if (!replacement) break;
@@ -410,27 +427,27 @@ function allowedByHardConstraints(part: Part, request: BuildRequest) {
   if (exactLock && part.id !== exactLock.value.slice(5)) return false;
   if (part.category === "cpu" && request.preferredCpuBrand !== "none" && part.brand.toLowerCase() !== request.preferredCpuBrand) return false;
   if (part.category === "gpu" && request.preferredGpuBrand !== "none" && part.brand.toLowerCase() !== request.preferredGpuBrand) return false;
-  if (part.category === "cooler" && request.preferredCooling !== "none" && part.type !== request.preferredCooling) return false;
+  const requiredCooling = request.constraints?.some(item => item.target === "cooling" && item.strength === "required");
+  if (part.category === "cooler" && requiredCooling && request.preferredCooling !== "none" && part.type !== request.preferredCooling) return false;
+  if (part.category === "gpu" && request.vramPreference && request.constraints?.some(item => item.target === "workloadTarget" && item.strength === "required" && /vram|显存/i.test(`${item.value} ${item.sourceText}`)) && part.vramGb < request.vramPreference) return false;
+  if (part.category === "ram" && request.ramCapacityGb && part.capacityGb < request.ramCapacityGb) return false;
+  if (part.category === "storage" && request.storageCapacityTb && part.capacityTb < request.storageCapacityTb) return false;
   const noRgb = request.constraints?.some(item => item.target === "lighting" && item.strength === "excluded");
   if (noRgb && part.tags.includes("rgb")) return false;
   const requiredColor = request.constraints?.find(item => item.target === "color" && item.strength === "required")?.value;
-  if (requiredColor && visibleCategories.includes(part.category) && partsByCategory(part.category).some(item => item.tags.includes(requiredColor)) && !part.tags.includes(requiredColor)) return false;
+  const region = marketRegion(request.country);
+  if (requiredColor && visibleCategories.includes(part.category) && partsByCategory(part.category).some(item => isPartEligibleForRegion(item, region) && item.tags.includes(requiredColor)) && !part.tags.includes(requiredColor)) return false;
   const requiredCaseStyle = request.constraints?.find(item => item.target === "caseStyle" && item.strength === "required")?.value;
-  if (requiredCaseStyle && requiredCaseStyle !== "none" && part.category === "case" && partsByCategory("case").some(item => item.tags.includes(requiredCaseStyle)) && !part.tags.includes(requiredCaseStyle)) return false;
+  if (requiredCaseStyle && requiredCaseStyle !== "none" && part.category === "case" && partsByCategory("case").some(item => isPartEligibleForRegion(item, region) && item.tags.includes(requiredCaseStyle)) && !part.tags.includes(requiredCaseStyle)) return false;
+  const sffRequired = request.constraints?.some(item => item.target === "formFactor" && item.value === "sff" && item.strength === "required");
+  if (sffRequired && part.category === "motherboard" && part.formFactor !== "Mini-ITX") return false;
+  if (sffRequired && part.category === "case" && !(part.supportedMotherboardFormFactors.length === 1 && part.supportedMotherboardFormFactors[0] === "Mini-ITX")) return false;
+  if (sffRequired && part.category === "psu" && part.formFactor !== "SFX") return false;
   return true;
 }
 
 function economyPerformance(part: Part, request: BuildRequest) {
-  switch (part.category) {
-    case "gpu": return request.useCase === "ai" ? part.aiScore : part.gamingScore4k;
-    case "cpu": return request.useCase === "gaming" ? part.gamingScore : part.productivityScore;
-    case "ram": return part.capacityGb;
-    case "storage": return part.capacityTb * 20;
-    case "cooler": return part.tdpRatingWatts / 3;
-    case "psu": return part.wattage / 12;
-    case "case": return part.maxGpuLengthMm / 5;
-    case "motherboard": return part.m2Slots * 10;
-  }
+  return capabilityScore(part, request);
 }
 
 function optimizeCheaper(initial: BuildParts, request: BuildRequest, marketCatalog: Part[]) {
@@ -552,7 +569,8 @@ export async function reviseRagBuild(query: string, current: RagBuildRecommendat
   }
 
   const { pools, chunks, marketSignals } = await retrieveCandidatePools(request, query, decision.action === "optimize" ? [] : decision.affectedCategories);
-  const marketCatalog = parts.map(part => withMarketPrice(part, marketSignals.get(part.id)));
+  const region = marketRegion(request.country);
+  const marketCatalog = parts.filter(part => isPartEligibleForRegion(part, region) && isCatalogPartSelectable(part)).map(part => withMarketPrice(part, marketSignals.get(part.id)));
   let direct = new Set(decision.affectedCategories);
   let nextParts = Object.fromEntries(categories.map(category => [category, withMarketPrice(current.parts[category], marketSignals.get(current.parts[category].id))])) as unknown as BuildParts;
   if (decision.action === "optimize") {
@@ -579,7 +597,8 @@ export async function reviseRagBuild(query: string, current: RagBuildRecommendat
   const repaired = repairCompatibility(nextParts, request, direct, marketCatalog);
   nextParts = repaired.parts;
   const changes = changesBetween(current.parts, nextParts, repaired.induced, decision.reason);
-  const totalPrice = categories.reduce((sum, category) => sum + priceIn(nextParts[category], request.currency), 0);
+  const ownedIds = new Set(request.existingPartIds || []);
+  const totalPrice = categories.reduce((sum, category) => sum + (ownedIds.has(nextParts[category].id) ? 0 : priceIn(nextParts[category], request.currency)), 0);
   const compatibility = checkCompatibility(nextParts);
   const performance = await estimatePerformance(nextParts, request);
   const affected = new Set([...direct, ...repaired.induced]);
@@ -588,7 +607,7 @@ export async function reviseRagBuild(query: string, current: RagBuildRecommendat
     if (!changed) return item;
     const part = nextParts[item.category];
     const candidate = pools[item.category].find(entry => entry.part.id === part.id);
-    const marketReason = candidate ? ` ${candidate.market.availability.replace("_", " ")}; ${candidate.market.usedFallback ? "catalog fallback" : `${candidate.market.retailer} price`}.` : "";
+    const marketReason = candidate ? ` ${candidate.market.availability.replace("_", " ")}; ${candidate.market.priceSource === "regional_catalog" ? `${candidate.market.region} retailer-catalog price` : candidate.market.priceSource === "global_reference" ? "global reference price" : `${candidate.market.retailer} live price`}.` : "";
     return { category: item.category, considered: pools[item.category].slice(0, 4).map(entry => entry.part.name), selected: part.name, reason: `${changed.reason}${marketReason}`, evidenceIds: candidate?.evidence.map(entry => entry.id) || [] };
   });
   const mergedChunks = [...chunks, ...current.retrievedChunks].filter((chunk, index, all) => all.findIndex(item => item.id === chunk.id) === index).slice(0, 18);
@@ -600,10 +619,12 @@ export async function reviseRagBuild(query: string, current: RagBuildRecommendat
     context: nextContext(context, query, decision.raw || JSON.stringify({ action: decision.action, changed: changes.map(change => change.category) })),
     tokenUsage: decision.usage,
   };
-  return {
+  const nextBuild = {
     ...current, id: `rag-${Date.now().toString(36)}`, request, parts: nextParts, totalPrice, compatibility, performance,
     estimatedWattage: estimateWattage(nextParts), generatedAt: new Date().toISOString(), retrievedChunks: mergedChunks,
     retrieval: summarizeRetrieval(mergedChunks),
     reasoning, alternativeBuilds: [], interaction, market: summarizeBuildMarket(Object.values(nextParts), marketSignals, marketRegion(request.country)),
   };
+  const { explanation: _previousExplanation, compatibilitySuggestion: _previousSuggestion, ...buildForExplanation } = nextBuild;
+  return { ...nextBuild, ...await generateRagExplanation(buildForExplanation, ai) };
 }

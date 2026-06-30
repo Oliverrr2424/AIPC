@@ -34,6 +34,9 @@ export async function estimatePerformance(parts: BuildParts, request: BuildReque
   const cyberpunk = gpuBench.filter(b => b.benchmarkKey === "cyberpunk-2077");
   const fpsRow = cyberpunk.find(b => b.resolution === r) ?? cyberpunk.find(b => b.resolution === "1440p") ?? null;
   const estimatedFps = fpsRow?.value ?? null;
+  const targetFps = request.targetFps;
+  const targetStatus = targetFps == null ? undefined : estimatedFps == null ? "unknown" as const : estimatedFps >= targetFps ? "met" as const : "below" as const;
+  const targetGapFps = targetFps == null || estimatedFps == null ? null : estimatedFps - targetFps;
   const fpsTier = estimatedFps != null
     ? (estimatedFps >= 120 ? "Ultra" : estimatedFps >= 80 ? "High" : estimatedFps >= 50 ? "Good" : "Entry")
     : tier(combined);
@@ -56,10 +59,13 @@ export async function estimatePerformance(parts: BuildParts, request: BuildReque
       resolution: r,
       estimatedFpsTier: fpsTier,
       estimatedFps,
+      targetFps,
+      targetStatus,
+      targetGapFps,
       benchmarks: toNumeric(cyberpunk),
       explanation: estimatedFps != null
-        ? `${parts.gpu.name} delivers ~${estimatedFps} fps in Cyberpunk 2077 at ${r} Ultra (public benchmark, ${fpsRow?.sourceName}). Tier: ${fpsTier}.`
-        : `${parts.gpu.name} drives the ${r} tier while ${parts.cpu.name} keeps frame delivery balanced. No FPS benchmark available — relative tier only.`,
+        ? `${parts.gpu.name} delivers ~${estimatedFps} fps in Cyberpunk 2077 at ${r} Ultra (public benchmark, ${fpsRow?.sourceName}).${targetFps ? ` This representative result is ${targetStatus === "met" ? "at or above" : "below"} the ${targetFps} FPS target.` : ""} Tier: ${fpsTier}.`
+        : `${parts.gpu.name} drives the ${r} tier while ${parts.cpu.name} contributes to frame delivery. No measured FPS row is available for this exact GPU and resolution, so the ${targetFps ? `${targetFps} FPS target remains unverified` : "result is a relative tier only"}.`,
     },
     ai: {
       vramGb: v,

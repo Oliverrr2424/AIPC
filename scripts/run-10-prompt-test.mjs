@@ -79,6 +79,8 @@ function audit(test, r) {
 
   const compatFails = (r.compatibility || []).filter(c => c.status === "FAIL");
   if (compatFails.length) fails.push(`compat: ${compatFails.length} FAIL`);
+  const compatUnknowns = (r.compatibility || []).filter(c => c.status === "UNKNOWN");
+  if (compatUnknowns.length) warnings.push(`compat: ${compatUnknowns.length} UNKNOWN`);
 
   const overBudget = r.totalPrice > req.budget;
   if (overBudget) warnings.push(`over-budget: $${r.totalPrice} > $${req.budget}`);

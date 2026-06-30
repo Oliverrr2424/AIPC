@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { generateRagBuild, type RagProgressStage } from "@/lib/rag/ragBuildGenerator";
 import { reviseRagBuild } from "@/lib/rag/conversationAgent";
 import { ConstraintConflictError } from "@/lib/rag/constraintConflict";
+import { BuildOptimizationError } from "@/lib/rag/buildOptimizer";
 import { partById } from "@/data/parts";
 import { DEFAULT_AI_OPTIONS, isAiModelId, type ThinkingMode } from "@/types/ai";
 import type { RagBuildRecommendation } from "@/types/knowledge";
@@ -39,7 +40,7 @@ export async function POST(request: Request) {
             .then(data => { send({ type: "result", data }); controller.close(); })
             .catch(error => {
               console.error("RAG recommendation failed:", error instanceof Error ? error.message : "Unknown error");
-              send({ type: "error", error: "Unable to generate a RAG recommendation." });
+              send({ type: "error", error: error instanceof BuildOptimizationError || error instanceof ConstraintConflictError ? error.message : "Unable to generate a RAG recommendation." });
               controller.close();
             });
         },
@@ -53,6 +54,7 @@ export async function POST(request: Request) {
       // relax instead of silently substituting a non-matching part.
       return NextResponse.json({ error: error.message, conflict: { constraints: error.conflicts } }, { status: 422 });
     }
+    if (error instanceof BuildOptimizationError) return NextResponse.json({ error: error.message, conflict: { reason: error.reason } }, { status: 422 });
     console.error("RAG recommendation failed:", error instanceof Error ? error.message : "Unknown error");
     return NextResponse.json({ error: "Unable to generate a RAG recommendation." }, { status: 500 });
   }

@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { parts } from "../src/data/parts";
 import type { Part, PartCategory } from "../src/types/parts";
+import { catalogIdentityIssue } from "../src/lib/catalog/catalogQuality";
 
 type Finding = { severity: "error" | "warning"; rule: string; partId?: string; category?: PartCategory; message: string };
 const findings: Finding[] = [];
@@ -95,13 +96,26 @@ for (const fact of knownFacts) {
 const categories: PartCategory[] = ["cpu", "gpu", "motherboard", "ram", "storage", "cooler", "psu", "case"];
 const counts = Object.fromEntries(categories.map(category => [category, parts.filter(part => part.category === category).length]));
 for (const [category, count] of Object.entries(counts)) if (count < 50) findings.push({ severity: "error", rule: "category-count", category: category as PartCategory, message: `${count} parts; target is at least 50` });
+const compatibilityFields: Record<PartCategory, string[]> = {
+  cpu: ["memoryTypes", "family"], gpu: ["thicknessSlots", "powerConnector"], motherboard: ["ramSlots", "supportedCpuFamilies"], ram: ["qvlMotherboardIds"],
+  storage: ["nandType", "tbw", "warrantyYears"], cooler: ["supportedSockets", "radiatorSizeMm"], psu: ["lengthMm", "pcie8PinConnectors", "twelveV2x6Connectors"], case: ["maxGpuThicknessSlots", "supportedRadiatorSizesMm", "maxPsuLengthMm"],
+};
+const compatibilityFieldCoverage = Object.fromEntries(categories.map(category => {
+  const categoryParts = parts.filter(part => part.category === category);
+  const fields = Object.fromEntries(compatibilityFields[category].map(field => [field, categoryParts.filter(part => (part as unknown as Record<string, unknown>)[field] != null).length]));
+  return [category, { total: categoryParts.length, fields }];
+}));
+const excludedFromRecommendation = parts.flatMap(part => {
+  const issue = catalogIdentityIssue(part);
+  return issue ? [{ partId: part.id, issue }] : [];
+});
 
 async function main() {
   const outputArg = process.argv.find(arg => arg.startsWith("--out="));
   const outputPath = path.resolve(outputArg?.slice(6) || "outputs/ca-crawl-20260629/field-audit.json");
   const errors = findings.filter(finding => finding.severity === "error");
   const warnings = findings.filter(finding => finding.severity === "warning");
-  const report = { generatedAt: new Date().toISOString(), summary: { totalParts: parts.length, caParts: parts.filter(part => part.id.startsWith("ca-")).length, counts, errors: errors.length, warnings: warnings.length }, findings };
+  const report = { generatedAt: new Date().toISOString(), summary: { totalParts: parts.length, caParts: parts.filter(part => part.id.startsWith("ca-")).length, counts, excludedFromRecommendation: excludedFromRecommendation.length, compatibilityFieldCoverage, errors: errors.length, warnings: warnings.length }, excludedFromRecommendation, findings };
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   await fs.writeFile(outputPath, JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report.summary, null, 2));

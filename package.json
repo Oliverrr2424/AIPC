@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test:rag": "node scripts/rag-regression.mjs",
     "test:conversation": "DATABASE_URL=${DATABASE_URL:-postgresql://aipc:aipc@localhost:5432/aipc?schema=public} tsx scripts/conversation-regression.ts",
+    "test:optimizer": "tsx scripts/optimizer-regression.ts",
     "db:generate": "prisma generate",
     "db:up": "docker compose up -d db",
     "db:down": "docker compose down",

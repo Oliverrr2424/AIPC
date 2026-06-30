@@ -1,5 +1,5 @@
 import { partById } from "@/data/parts";
-import { checkCompatibility } from "@/lib/compatibility/compatibilityChecker";
+import { checkCompatibility, hasKnownCompatibilityFailure } from "@/lib/compatibility/compatibilityChecker";
 import { priceIn } from "@/lib/pricing/priceEstimator";
 import { withMarketPrice } from "@/lib/pricing/marketSignals";
 import type { BuildRequest } from "@/types/build";
@@ -7,14 +7,15 @@ import type { BuildParts, MotherboardPart, Part, PartCategory } from "@/types/pa
 import type { MarketSignal } from "@/types/market";
 import type { CandidatePools, RetrievedKnowledgeChunk } from "@/types/knowledge";
 import { scorePartForOptimizer } from "./candidateRetriever";
+import { categoryImportance, scoreCompleteBuild } from "./utilityModel";
 
 const ORDER: PartCategory[] = ["cpu", "motherboard", "ram", "cooler", "gpu", "case", "storage", "psu"];
-const BEAM_WIDTH = 48;
+const BEAM_WIDTH = 72;
 
 interface BeamState {
   parts: Partial<BuildParts>;
   price: number; // excludes user-owned parts
-  utility: number; // pure capability/quality, price-independent
+  utility: number; // workload-weighted capability, before portfolio adjustments
 }
 
 export interface OptimizeArgs {
@@ -24,39 +25,17 @@ export interface OptimizeArgs {
   chunks: RetrievedKnowledgeChunk[];
 }
 
-function estimateLoad(p: BuildParts) {
-  return Math.round(p.cpu.tdpWatts + p.gpu.tdpWatts + 85 + (p.ram.capacityGb / 8) * 3 + p.storage.capacityTb * 5);
-}
-
-function requiredWattage(p: BuildParts) {
-  return Math.ceil(estimateLoad(p) * 1.35 / 50) * 50;
-}
-
-// Returns true if any HARD compatibility rule is violated among the parts that
-// are already present. Rules involving a missing part are skipped (checked once
-// all their parts are placed). Mirrors compatibilityChecker's FAIL rules and
-// additionally rejects coolers that cannot mount the CPU socket.
-function partialViolation(b: Partial<BuildParts>): boolean {
-  const { cpu, gpu, motherboard, ram, storage, cooler, psu } = b;
-  const pc = b.case;
-  if (cpu && motherboard && cpu.socket !== motherboard.socket) return true;
-  if (ram && motherboard && ram.memoryType !== motherboard.memoryType) return true;
-  if (pc && motherboard && !pc.supportedMotherboardFormFactors.includes(motherboard.formFactor)) return true;
-  if (gpu && pc && gpu.lengthMm > pc.maxGpuLengthMm) return true;
-  if (cooler && pc && cooler.type !== "aio" && cooler.heightMm && cooler.heightMm > pc.maxCoolerHeightMm) return true;
-  if (cooler && cpu && (!cooler.supportedSockets.includes(cpu.socket) || cooler.tdpRatingWatts < cpu.tdpWatts)) return true;
-  if (storage && motherboard && !motherboard.storageInterfaces.includes(storage.interface)) return true;
-  if (pc && psu && !pc.psuFormFactors.includes(psu.formFactor)) return true;
-  if (psu && cpu && gpu && ram && storage && pc) {
-    if (psu.wattage < requiredWattage(b as BuildParts)) return true;
+export class BuildOptimizationError extends Error {
+  constructor(public readonly reason: "budget" | "compatibility", message: string) {
+    super(message);
+    this.name = "BuildOptimizationError";
   }
-  return false;
 }
 
 export function optimizeBuild({ pools, request, marketSignals, chunks }: OptimizeArgs): BuildParts {
   const currency = request.currency;
   const marketPart = <T extends Part>(part: T): T => withMarketPrice(part, marketSignals.get(part.id));
-  const marketFor = (part: Part): MarketSignal => marketSignals.get(part.id) ?? { partId: part.id, effectivePriceUsd: part.price, listPriceUsd: part.price, availability: "unknown", isStale: true, usedFallback: true, sampleCount30d: 0, trend: "insufficient", confidence: 0.15, marketScore: 25 };
+  const marketFor = (part: Part): MarketSignal => marketSignals.get(part.id) ?? { partId: part.id, effectivePriceUsd: part.price, listPriceUsd: part.price, availability: "unknown", isStale: true, usedFallback: true, priceSource: "global_reference", sampleCount30d: 0, trend: "insufficient", confidence: 0.15, marketScore: 25 };
 
   const owned: Partial<Record<PartCategory, Part>> = {};
   for (const id of request.existingPartIds || []) {
@@ -114,16 +93,13 @@ export function optimizeBuild({ pools, request, marketSignals, chunks }: Optimiz
     for (const beam of beams) {
       for (const part of candidates) {
         const parts = { ...beam.parts, [category]: part } as Partial<BuildParts>;
-        if (partialViolation(parts)) continue;
+        if (hasKnownCompatibilityFailure(parts)) continue;
         const addPrice = owned[category] ? 0 : priceIn(part, currency);
-        let utility = beam.utility + utilOf(category, part);
-        // Light synergy: a chipset that suits the CPU tier (a WARNING-level
-        // pairing in the deterministic checker) is gently preferred.
-        if (category === "motherboard" && parts.cpu && (part as MotherboardPart).cpuTiers.includes(parts.cpu.tier)) utility += 6;
-        // Prefer a PSU with healthy (>=1.5x) headroom when it fits the budget,
-        // matching the deterministic checker's "healthy headroom" threshold so we
-        // avoid its modest-margin warning without making headroom a hard floor.
-        if (category === "psu" && parts.cpu && parts.gpu && parts.ram && parts.storage && parts.psu!.wattage / estimateLoad(parts as BuildParts) >= 1.5) utility += 8;
+        let utility = beam.utility + utilOf(category, part) * categoryImportance(request, category);
+        // A sensible chipset is a small within-platform nudge. It is deliberately
+        // scaled to the whole-build 0..100 objective rather than adding six raw
+        // points as the old equal-category objective did.
+        if (category === "motherboard" && parts.cpu && (part as MotherboardPart).cpuTiers.includes(parts.cpu.tier)) utility += .35;
         const state = { parts, price: beam.price + addPrice, utility };
         const remainingMin = suffixMinNoPsu[ci + 1] + (psuIndex > ci ? cheapestAdequatePsu(partialRequiredW(parts)) : 0);
         // Admissible budget pruning: keep only partials that can still complete
@@ -136,27 +112,28 @@ export function optimizeBuild({ pools, request, marketSignals, chunks }: Optimiz
     // to the least-over-budget partials so we still return a build.
     const pool = expanded.length ? expanded : overBudgetOnly;
     if (!pool.length) break; // owned/required parts are mutually incompatible
-    pool.sort((a, b) => b.utility - a.utility || a.price - b.price);
+    const partialPriority = (state: BeamState) => state.utility - (state.price / Math.max(request.budget, 1)) * (request.preferValue ? 7 : 2.5);
+    pool.sort((a, b) => partialPriority(b) - partialPriority(a) || a.price - b.price);
     const kept = pool.slice(0, BEAM_WIDTH);
-    // Retain the single cheapest partial as a feasibility anchor.
-    const cheapest = pool.reduce((min, state) => (state.price < min.price ? state : min), pool[0]);
-    if (!kept.includes(cheapest)) kept.push(cheapest);
+    // Retain several low-cost states so tiny local score differences cannot
+    // erase the eventual value/Pareto knee before complete-build scoring.
+    [...pool].sort((a, b) => a.price - b.price || b.utility - a.utility).slice(0, 8).forEach(state => { if (!kept.includes(state)) kept.push(state); });
     beams = kept;
   }
 
   const complete = beams.filter(beam => ORDER.every(category => beam.parts[category]));
   const valid = complete.filter(beam => checkCompatibility(beam.parts as BuildParts).every(result => result.status !== "FAIL"));
   const inBudget = valid.filter(beam => beam.price <= request.budget);
-  const pickFrom = inBudget.length ? inBudget : valid.length ? valid : complete;
-  const best = [...pickFrom].sort((a, b) => b.utility - a.utility || a.price - b.price)[0];
-  if (best) return best.parts as BuildParts;
-
-  // Extremely defensive fallback: cheapest compatible part per category. Reached
-  // only if the beam never completed (e.g. mutually incompatible owned parts).
-  const fallback: Partial<BuildParts> = {};
-  for (const category of ORDER) {
-    const ordered = [...candidatesFor(category)].sort((a, b) => priceIn(a, currency) - priceIn(b, currency));
-    fallback[category] = (ordered.find(part => !partialViolation({ ...fallback, [category]: part })) ?? ordered[0]) as never;
+  if (!inBudget.length) {
+    const cheapestValid = [...valid].sort((a, b) => a.price - b.price)[0];
+    if (cheapestValid) throw new BuildOptimizationError("budget", `No compatible build fits the hard ${request.currency} ${request.budget} budget. The cheapest feasible candidate is ${request.currency} ${cheapestValid.price}.`);
+    throw new BuildOptimizationError("compatibility", "No complete build satisfies the stated hard constraints and known compatibility rules.");
   }
-  return fallback as BuildParts;
+
+  const scored = inBudget.map(state => {
+    const build = state.parts as BuildParts;
+    const utilities = Object.fromEntries(ORDER.map(category => [category, utilOf(category, build[category])])) as Record<PartCategory, number>;
+    return { state, breakdown: scoreCompleteBuild(build, request, utilities, state.price) };
+  }).sort((a, b) => b.breakdown.total - a.breakdown.total || a.state.price - b.state.price);
+  return scored[0].state.parts as BuildParts;
 }

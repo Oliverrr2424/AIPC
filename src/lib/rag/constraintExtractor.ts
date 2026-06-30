@@ -34,7 +34,7 @@ const strengths = new Set<ConstraintStrength>(["required", "preferred", "exclude
 function canonicalValue(target: ConstraintTarget, value: string, sourceText: string) {
   const text = `${value} ${sourceText}`.toLowerCase();
   if (target === "cpuBrand") return /intel|英特尔/.test(text) ? "intel" : /amd|ryzen|锐龙/.test(text) ? "amd" : undefined;
-  if (target === "gpuBrand") return /nvidia|geforce|rtx|英伟达|n卡/.test(text) ? "nvidia" : /amd|radeon|a卡/.test(text) ? "amd" : /intel|arc|英特尔/.test(text) ? "intel" : undefined;
+  if (target === "gpuBrand") return /nvidia|geforce|rtx|英伟达|n卡|cuda/.test(text) ? "nvidia" : /amd|radeon|a卡/.test(text) ? "amd" : /intel|arc|英特尔/.test(text) ? "intel" : undefined;
   if (target === "color") return /white|白/.test(text) ? "white" : /black|黑/.test(text) ? "black" : undefined;
   if (target === "lighting") return "rgb";
   if (target === "cooling") return /air|风冷/.test(text) ? "air" : /aio|liquid|water|水冷/.test(text) ? "aio" : undefined;

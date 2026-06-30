@@ -81,7 +81,13 @@ export interface RagBuildRecommendation extends BuildRecommendation {
   reasoning: RagReasoningItem[];
   alternativeBuilds: AlternativeBuildSummary[];
   retrieval: RetrievalSummary;
+  compatibilitySuggestion?: CompatibilitySuggestion;
   interaction?: AgentInteraction;
+}
+
+export interface CompatibilitySuggestion {
+  issueId: string;
+  action: string;
 }
 
 export type BuildTurnAction = "draft" | "patch" | "optimize" | "rebuild" | "explain";

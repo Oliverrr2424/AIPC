@@ -13,6 +13,9 @@ export interface PerformanceEstimate {
     resolution: "1080p" | "1440p" | "4k";
     estimatedFpsTier: "Entry" | "Good" | "High" | "Ultra";
     estimatedFps: number | null;
+    targetFps?: number;
+    targetStatus?: "met" | "below" | "unknown";
+    targetGapFps?: number | null;
     benchmarks: NumericBenchmark[];
     explanation: string;
   };

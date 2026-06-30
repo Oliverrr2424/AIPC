@@ -16,8 +16,9 @@ type ProgressReporter = (stage: RagProgressStage) => void;
 
 const selectedCandidate = (candidates: PartCandidate[], part: Part) => candidates.find(candidate => candidate.part.id === part.id) || candidates[0];
 
-function makeAlternatives(parts: BuildParts, pools: Awaited<ReturnType<typeof retrieveCandidatePools>>["pools"], currency: Currency): AlternativeBuildSummary[] {
-  const currentTotal = Object.values(parts).reduce((sum, part) => sum + priceIn(part, currency), 0);
+function makeAlternatives(parts: BuildParts, pools: Awaited<ReturnType<typeof retrieveCandidatePools>>["pools"], currency: Currency, existingPartIds: string[] = []): AlternativeBuildSummary[] {
+  const ownedIds = new Set(existingPartIds);
+  const currentTotal = Object.values(parts).reduce((sum, part) => sum + (ownedIds.has(part.id) ? 0 : priceIn(part, currency)), 0);
   const alternatives: AlternativeBuildSummary[] = [];
   const valueGpu = [...pools.gpu].reverse().find(candidate => priceIn(candidate.part, currency) < priceIn(parts.gpu, currency));
   if (valueGpu) alternatives.push({ title: "Value-focused variant", totalPrice: currentTotal - priceIn(parts.gpu, currency) + priceIn(valueGpu.part, currency), changes: [{ category: "gpu", from: parts.gpu.name, to: valueGpu.part.name, priceDifference: priceIn(valueGpu.part, currency) - priceIn(parts.gpu, currency) }], tradeoff: "Lower cost with reduced graphics or compute headroom." });
@@ -43,14 +44,16 @@ export async function generateRagBuildFromRequest(sourceQuery: string, ai: AiGen
       pools[category].unshift({ part, market, evidence: evidenceFor(part, category, chunks).slice(0, 3), score: scoreCandidateForDisplay(part, request, category, chunks, market) });
     }
   }
-  const totalPrice = Object.values(parts).reduce((sum, part) => sum + priceIn(part, request.currency), 0);
+  const ownedIds = new Set(request.existingPartIds || []);
+  const totalPrice = Object.values(parts).reduce((sum, part) => sum + (ownedIds.has(part.id) ? 0 : priceIn(part, request.currency)), 0);
   const compatibility = checkCompatibility(parts), performance = await estimatePerformance(parts, request), estimatedWattage = estimateWattage(parts);
   const selected = Object.entries(parts) as Array<[PartCategory, Part]>;
   const reasoning: RagReasoningItem[] = selected.map(([category, part]) => {
     const candidate = selectedCandidate(pools[category], part);
     const strongest = candidate?.evidence[0];
     const hardConstraint = category === "cpu" && request.preferredCpuBrand !== "none" ? `${request.preferredCpuBrand?.toUpperCase()} CPU hard constraint. ` : category === "gpu" && request.preferredGpuBrand !== "none" ? `${request.preferredGpuBrand?.toUpperCase()} GPU hard constraint. ` : request.preferredColor !== "none" && part.tags.includes(request.preferredColor || "") ? `${request.preferredColor} appearance constraint. ` : "";
-    const marketReason = candidate ? `${candidate.market.availability.replace("_", " ")}, ${candidate.market.usedFallback ? "catalog-price fallback" : `${candidate.market.retailer} market price`}, market score ${candidate.score.marketScore.toFixed(1)}.` : "Existing owned part.";
+    const priceLabel = candidate?.market.priceSource === "regional_catalog" ? `${candidate.market.region} retailer-catalog price` : candidate?.market.priceSource === "global_reference" ? "global reference price" : `${candidate?.market.retailer || "live retailer"} market price`;
+    const marketReason = candidate ? `${candidate.market.availability.replace("_", " ")}, ${priceLabel}, market score ${candidate.score.marketScore.toFixed(1)}.` : "Existing owned part.";
     return { category, considered: pools[category].slice(0, 4).map(item => item.part.name), selected: part.name, reason: `${hardConstraint}Weighted score ${candidate?.score.totalScore.toFixed(1) || "existing"}. ${marketReason} ${strongest ? strongest.title : "Selected from structured specifications and deterministic constraints."}`, evidenceIds: candidate?.evidence.map(item => item.id) || [] };
   });
   const title = request.useCase === "ai" ? "RAG Local AI Workstation" : request.useCase === "gaming" ? `RAG ${request.resolution === "4k" ? "4K" : request.resolution || "1440p"} Gaming Build` : request.useCase === "development" ? "RAG Developer Workstation" : request.useCase === "video" ? "RAG Creator Workstation" : "RAG Balanced Build";
@@ -60,7 +63,7 @@ export async function generateRagBuildFromRequest(sourceQuery: string, ai: AiGen
     parts: Object.fromEntries(selected.map(([category, part]) => [category, part.id])),
   });
   const raw = {
-    id: `rag-${Date.now().toString(36)}`, title, request, parts, totalPrice, estimatedWattage, compatibility, performance, alternatives: [], generatedAt: new Date().toISOString(), parserMode, aiModel: ai.model, thinkingMode: ai.thinking, sourceQuery, retrievedChunks: chunks, retrieval, reasoning, alternativeBuilds: makeAlternatives(parts, pools, request.currency), market: summarizeBuildMarket(Object.values(parts), marketSignals, marketRegion(request.country)),
+    id: `rag-${Date.now().toString(36)}`, title, request, parts, totalPrice, estimatedWattage, compatibility, performance, alternatives: [], generatedAt: new Date().toISOString(), parserMode, aiModel: ai.model, thinkingMode: ai.thinking, sourceQuery, retrievedChunks: chunks, retrieval, reasoning, alternativeBuilds: makeAlternatives(parts, pools, request.currency, request.existingPartIds), market: summarizeBuildMarket(Object.values(parts), marketSignals, marketRegion(request.country)),
     interaction: {
       action: "draft" as const,
       message: "Baseline build created. Tell me what you want to change; unchanged parts will stay locked unless compatibility requires a linked adjustment.",
@@ -74,7 +77,8 @@ export async function generateRagBuildFromRequest(sourceQuery: string, ai: AiGen
     },
   };
   reportProgress?.("llm-explanation");
-  return { ...raw, explanation: await generateRagExplanation(raw, ai) };
+  const generatedExplanation = await generateRagExplanation(raw, ai);
+  return { ...raw, ...generatedExplanation };
 }
 
 export async function generateRagBuild(sourceQuery: string, ai: AiGenerationOptions, reportProgress?: ProgressReporter): Promise<RagBuildRecommendation> {

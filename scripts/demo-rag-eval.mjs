@@ -108,11 +108,20 @@ function audit(test, result) {
   if (failedCompatibility.length) errors.push(`Compatibility FAIL: ${failedCompatibility.map(item => item.rule).join(", ")}`);
   const compatibilityWarnings = (result.compatibility || []).filter(item => item.status === "WARNING");
   if (compatibilityWarnings.length) warnings.push(`Compatibility warning: ${compatibilityWarnings.map(item => item.rule).join(", ")}`);
+  const compatibilityUnknowns = (result.compatibility || []).filter(item => item.status === "UNKNOWN");
+  if (compatibilityUnknowns.length) warnings.push(`Compatibility unknown: ${compatibilityUnknowns.map(item => item.rule).join(", ")}`);
   const utilization = Number(result.totalPrice || 0) / Number(req.budget || 1);
   if (utilization > 1.2) errors.push(`Total is ${(utilization * 100).toFixed(1)}% of budget`);
   else if (utilization > 1.0) warnings.push(`Total is ${(utilization * 100).toFixed(1)}% of budget`);
   if (!(result.retrievedChunks || []).length) errors.push("No RAG evidence returned");
-  if ((result.retrievedChunks || []).some(chunk => chunk.embeddingProvider !== "ollama")) errors.push("At least one evidence row did not use Ollama");
+  const fallbackEvidence = (result.retrievedChunks || []).filter(chunk => chunk.embeddingProvider !== "ollama");
+  if (fallbackEvidence.length) warnings.push(`${fallbackEvidence.length} evidence row(s) used keyword fallback after vector retrieval degraded`);
+  if (req.useCase === "gaming" && !expected.minRam && Number(parts.ram?.capacityGb || 0) > 32) warnings.push(`Gaming build has ${parts.ram.capacityGb}GB RAM without an explicit capacity request`);
+  const draw = Number(result.estimatedWattage || 0), psuW = Number(parts.psu?.wattage || 0);
+  if (draw > 0 && psuW / draw > 2) warnings.push(`PSU headroom is excessive: ${psuW}W for ${draw}W estimated draw`);
+  if (expected.targetFps && result.performance?.gaming?.estimatedFps == null) warnings.push(`No measured FPS evidence for the ${expected.targetFps} FPS target`);
+  else if (expected.targetFps && Number(result.performance?.gaming?.estimatedFps) < expected.targetFps) warnings.push(`Measured representative FPS ${result.performance.gaming.estimatedFps} is below the ${expected.targetFps} target`);
+  if (Number(result.market?.globalReferencePricedParts || 0) > 0) warnings.push(`${result.market.globalReferencePricedParts} selected prices are global references, not verified regional offers`);
 
   return {
     verdict: errors.length ? "FAIL" : warnings.length ? "WARNING" : "PASS",

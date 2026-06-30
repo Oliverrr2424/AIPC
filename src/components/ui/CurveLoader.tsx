@@ -274,7 +274,7 @@ export function CurveLoader({ size = 240, className }: CurveLoaderProps) {
     const clock = new THREE.Clock();
     let animationFrame = 0;
     let elapsed = 0;
-    const cycleDuration = 10.2;
+    const cycleDuration = 7.2;
 
     const animate = () => {
       animationFrame = requestAnimationFrame(animate);
@@ -285,8 +285,8 @@ export function CurveLoader({ size = 240, className }: CurveLoaderProps) {
       parts.forEach((part, index) => {
         let progress = 1;
         if (!reducedMotion) {
-          const inStart = 0.35 + index * 0.28;
-          const outStart = 7.1 + (parts.length - 1 - index) * 0.12;
+          const inStart = 0.15 + index * 0.28;
+          const outStart = 5.2 + (parts.length - 1 - index) * 0.12;
           if (cycle < inStart) progress = 0;
           else if (cycle < inStart + 1.15) progress = easeOutCubic(clamp((cycle - inStart) / 1.15));
           else if (cycle < outStart) progress = 1;

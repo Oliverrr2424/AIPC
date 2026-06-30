@@ -170,11 +170,17 @@ function Conversation({ result, messages, value, onChange, onSubmit, onReset, lo
     const transcript = transcriptRef.current;
     if (transcript) transcript.scrollTo({ top: transcript.scrollHeight, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   }, [messages.length, messages[messages.length - 1]?.content]);
-  const suggestions = [
+  const defaultSuggestions: Array<[string, string]> = [
     [t("conversation.suggestion.cheaper"), "Make it cheaper"],
     [t("conversation.suggestion.quiet"), "Make it quieter"],
     [t("conversation.suggestion.explain"), "Explain the GPU choice"],
   ];
+  const activeCompatibilitySuggestion = result.compatibilitySuggestion && result.compatibility.some(item => item.id === result.compatibilitySuggestion?.issueId && item.status !== "PASS")
+    ? result.compatibilitySuggestion
+    : undefined;
+  const suggestions: Array<[string, string]> = activeCompatibilitySuggestion
+    ? [[activeCompatibilitySuggestion.action, activeCompatibilitySuggestion.action], ...defaultSuggestions.slice(0, 2)]
+    : defaultSuggestions;
   return <section className="surface overflow-hidden rounded-2xl shadow-panel">
     <div className="border-b border-[var(--line)] px-5 py-5 sm:px-7">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -197,9 +203,9 @@ function Conversation({ result, messages, value, onChange, onSubmit, onReset, lo
     {interaction?.changedParts.length ? <div className="border-t border-[var(--line)] px-5 py-3 sm:px-7"><div className="flex flex-wrap gap-2">{interaction.changedParts.map(change => <Badge key={change.category} tone={change.inducedByCompatibility ? "warning" : "accent"}>{change.category.toUpperCase()} {change.inducedByCompatibility ? t("conversation.linked") : t("conversation.changed")}</Badge>)}</div></div> : null}
     <form onSubmit={onSubmit} className="border-t border-[var(--line)] bg-[var(--panel-2)] p-4 sm:p-5">
       <div className="mb-3 flex gap-2 overflow-x-auto pb-1">{suggestions.map(([label, prompt]) => <button key={prompt} type="button" disabled={loading} onClick={() => onChange(prompt)} className="whitespace-nowrap rounded-lg border border-[var(--line)] bg-[var(--panel)] px-3 py-1.5 text-xs text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--text)] disabled:opacity-40">{label}</button>)}</div>
-      <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-        <div><textarea rows={2} value={value} onChange={event => onChange(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} disabled={loading} className="min-h-14 w-full resize-none rounded-xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3 text-sm leading-6 text-[var(--text)] placeholder:text-[var(--muted)]" placeholder={t("conversation.placeholder")}/><p className="mt-1.5 px-1 text-[10px] text-[var(--muted)]">{t("conversation.hint")}</p></div>
-        <Button className="h-12 sm:mb-[22px]" disabled={loading || value.trim().length < 2}>{loading ? <><SpinnerGap className="animate-spin"/>{t("conversation.updating")}</> : <>{t("conversation.update")}<ArrowRight/></>}</Button>
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem] sm:items-start">
+        <div><textarea rows={1} value={value} onChange={event => onChange(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} disabled={loading} className="h-12 min-h-12 w-full resize-none overflow-y-auto rounded-xl border border-[var(--line)] bg-[var(--panel)] px-4 py-[11px] text-sm leading-6 text-[var(--text)] placeholder:text-[var(--muted)]" placeholder={t("conversation.placeholder")}/><p className="mt-1.5 px-1 text-[10px] text-[var(--muted)]">{t("conversation.hint")}</p></div>
+        <Button className="h-12 w-full" disabled={loading || value.trim().length < 2}>{loading ? <><SpinnerGap className="animate-spin"/>{t("conversation.updating")}</> : <>{t("conversation.update")}<ArrowRight/></>}</Button>
       </div>
       {error && <p role="alert" className="mt-3 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-[var(--danger)]">{error}</p>}
       {interaction?.tokenUsage && <p className="mono mt-3 text-[10px] text-[var(--muted)]">DeepSeek input {interaction.tokenUsage.promptTokens} tokens, cache hit {interaction.tokenUsage.cacheHitTokens}, cache miss {interaction.tokenUsage.cacheMissTokens}</p>}
@@ -209,8 +215,8 @@ function Conversation({ result, messages, value, onChange, onSubmit, onReset, lo
 
 function RagResult({ result }: { result: RagBuildRecommendation }) {
   const { t } = useLocale();
-  const fails = result.compatibility.filter(item => item.status === "FAIL").length, warnings = result.compatibility.filter(item => item.status === "WARNING").length;
-  const status = fails ? "FAIL" : warnings ? "WARNING" : "PASS";
+  const fails = result.compatibility.filter(item => item.status === "FAIL").length, warnings = result.compatibility.filter(item => item.status === "WARNING").length, unknowns = result.compatibility.filter(item => item.status === "UNKNOWN").length;
+  const status = fails ? "FAIL" : warnings ? "WARNING" : unknowns ? "UNKNOWN" : "PASS";
   const modelLabel = AI_MODELS.find(model => model.id === result.aiModel)?.label || result.aiModel;
   const parserLabel = result.parserMode === "deepseek" ? "DEEPSEEK INTENT" : result.parserMode === "gemini" ? "GEMINI INTENT" : "LOCAL INTENT";
   const usedLocalParser = result.parserMode === "heuristic";
@@ -220,7 +226,7 @@ function RagResult({ result }: { result: RagBuildRecommendation }) {
   const retrievalFallback = retrieval.mode === "keyword-fallback";
   return <div className="mt-10 space-y-6">
     <header className="grid gap-6 border-b border-[var(--line)] pb-8 lg:grid-cols-[1fr_auto] lg:items-end">
-      <div><div className="flex flex-wrap gap-2"><Badge tone="accent">{parserLabel}</Badge><Badge tone={retrievalFallback ? "warning" : "success"}>{retrieval.mode === "vector" ? `VECTOR RAG · ${retrieval.embeddingModel || "EMBEDDINGS"}` : retrieval.mode === "keyword" ? "KEYWORD MODE" : "KEYWORD FALLBACK"}</Badge><Badge tone="neutral">{modelLabel} · {result.thinkingMode === "enabled" ? "THINKING" : "NON-THINKING"}</Badge><Badge tone={status === "PASS" ? "success" : status === "WARNING" ? "warning" : "danger"}>{status === "PASS" ? <CheckCircle/> : <WarningCircle/>}{status} COMPATIBILITY</Badge></div><h2 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">{result.title}</h2><p className="mt-3 max-w-3xl text-[var(--muted)]">Parsed as {result.request.useCase} with a {formatPrice(result.request.budget, result.request.currency)} budget. Retrieved {result.retrievedChunks.length} evidence chunks before deterministic selection.</p></div>
+      <div><div className="flex flex-wrap gap-2"><Badge tone="accent">{parserLabel}</Badge><Badge tone={retrievalFallback ? "warning" : "success"}>{retrieval.mode === "vector" ? `VECTOR RAG · ${retrieval.embeddingModel || "EMBEDDINGS"}` : retrieval.mode === "keyword" ? "KEYWORD MODE" : "KEYWORD FALLBACK"}</Badge><Badge tone="neutral">{modelLabel} · {result.thinkingMode === "enabled" ? "THINKING" : "NON-THINKING"}</Badge><Badge tone={status === "PASS" ? "success" : status === "WARNING" ? "warning" : status === "UNKNOWN" ? "neutral" : "danger"}>{status === "PASS" ? <CheckCircle/> : <WarningCircle/>}{status} COMPATIBILITY</Badge></div><h2 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">{result.title}</h2><p className="mt-3 max-w-3xl text-[var(--muted)]">Parsed as {result.request.useCase} with a {formatPrice(result.request.budget, result.request.currency)} budget. Retrieved {result.retrievedChunks.length} evidence chunks before deterministic selection.</p></div>
       <div><div className="text-sm text-[var(--muted)]">{t("result.estimated")}</div><div className="mono mt-1 text-4xl font-semibold">{formatPrice(result.totalPrice, result.request.currency)}</div></div>
     </header>
     {(usedLocalParser || overBudget || retrievalFallback) && <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5 sm:p-6">

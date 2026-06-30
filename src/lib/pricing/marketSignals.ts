@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db/client";
 import type { BuildMarketSummary, MarketSignal, MarketTrend } from "@/types/market";
-import type { Part } from "@/types/parts";
+import type { Part, PartMarketRegion } from "@/types/parts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HISTORY_DAYS = 30;
@@ -19,23 +19,44 @@ export function marketRegion(country: "Canada" | "US" | "China") {
   return country === "Canada" ? "CA" : country === "China" ? "CN" : "US";
 }
 
+export function partMarketRegions(part: Part): PartMarketRegion[] {
+  if (part.marketRegions?.length) return part.marketRegions;
+  if (part.id.startsWith("ca-") || part.tags.includes("ca-retail") || /\.ca\//i.test(part.productUrl || "")) return ["CA"];
+  return ["GLOBAL"];
+}
+
+export function isPartEligibleForRegion(part: Part, region: string) {
+  const regions = partMarketRegions(part);
+  return regions.includes("GLOBAL") || regions.includes(region as PartMarketRegion);
+}
+
 function round(value: number, digits = 2) {
   const scale = 10 ** digits;
   return Math.round(value * scale) / scale;
 }
 
-function fallbackSignal(part: Part): MarketSignal {
+export function catalogMarketSignal(part: Part, requestedRegion: string): MarketSignal {
+  const regions = partMarketRegions(part);
+  const regionalCatalog = regions.includes(requestedRegion as PartMarketRegion) && !regions.includes("GLOBAL") && part.priceKind === "retail";
+  const capturedAt = part.priceAsOf ? new Date(`${part.priceAsOf}T23:59:59Z`) : undefined;
+  const ageDays = capturedAt && Number.isFinite(capturedAt.getTime()) ? Math.max(0, (Date.now() - capturedAt.getTime()) / DAY_MS) : Number.POSITIVE_INFINITY;
+  const isStale = regionalCatalog ? ageDays > 3 : true;
+  const freshness = ageDays <= 1 ? 85 : ageDays <= 3 ? 68 : ageDays <= 7 ? 42 : 15;
   return {
     partId: part.id,
     effectivePriceUsd: part.price,
     listPriceUsd: part.price,
+    region: regionalCatalog ? requestedRegion : "GLOBAL",
+    url: part.priceSourceUrl || part.productUrl,
+    capturedAt: capturedAt && Number.isFinite(capturedAt.getTime()) ? capturedAt.toISOString() : undefined,
     availability: "unknown",
-    isStale: true,
+    isStale,
     usedFallback: true,
+    priceSource: regionalCatalog ? "regional_catalog" : "global_reference",
     sampleCount30d: 0,
     trend: "insufficient",
-    confidence: 0.15,
-    marketScore: 25,
+    confidence: regionalCatalog ? (isStale ? 0.3 : 0.48) : 0.15,
+    marketScore: regionalCatalog ? Math.round(35 + freshness * 0.35) : 25,
   };
 }
 
@@ -56,19 +77,19 @@ function trendFor(prices: number[], current: number): { trend: MarketTrend; chan
 }
 
 function buildSignal(part: Part, inputRows: Snapshot[], requestedRegion: string): MarketSignal {
-  if (!inputRows.length) return fallbackSignal(part);
+  if (!inputRows.length) return catalogMarketSignal(part, requestedRegion);
 
   // Only the requested region's snapshots are a valid market price. A US request
   // with no US data must NOT adopt a Canadian retailer price as the effective
   // price — fall back to the region-neutral catalog price with low confidence.
   const regional = inputRows.filter(row => row.region === requestedRegion);
-  if (!regional.length) return fallbackSignal(part);
+  if (!regional.length) return catalogMarketSignal(part, requestedRegion);
   const rows = regional;
   const latest = latestPerRetailer(rows);
   const realLatest = latest.filter(row => row.retailer !== "list");
   const stocked = realLatest.filter(row => row.inStock);
   const chosen = [...(stocked.length ? stocked : realLatest)].sort((a, b) => a.priceUsd - b.priceUsd || b.capturedAt.getTime() - a.capturedAt.getTime())[0];
-  if (!chosen) return fallbackSignal(part);
+  if (!chosen) return catalogMarketSignal(part, requestedRegion);
 
   const history = rows
     .filter(row => row.retailer === chosen.retailer && row.priceUsd > 0)
@@ -101,6 +122,7 @@ function buildSignal(part: Part, inputRows: Snapshot[], requestedRegion: string)
     availability,
     isStale,
     usedFallback: false,
+    priceSource: "live",
     sampleCount30d: prices.length,
     min30d: min30d == null ? undefined : round(min30d),
     max30d: max30d == null ? undefined : round(max30d),
@@ -115,7 +137,7 @@ function buildSignal(part: Part, inputRows: Snapshot[], requestedRegion: string)
 
 export async function getMarketSignals(catalog: Part[], country: "Canada" | "US" | "China"): Promise<Map<string, MarketSignal>> {
   const requestedRegion = marketRegion(country);
-  const fallback = new Map(catalog.map(part => [part.id, fallbackSignal(part)]));
+  const fallback = new Map(catalog.map(part => [part.id, catalogMarketSignal(part, requestedRegion)]));
   if (!catalog.length) return fallback;
   try {
     const since = new Date(Date.now() - HISTORY_DAYS * DAY_MS);
@@ -142,12 +164,14 @@ export function withMarketPrice<T extends Part>(part: T, signal?: MarketSignal):
 }
 
 export function summarizeBuildMarket(parts: Part[], signals: Map<string, MarketSignal>, region: string): BuildMarketSummary {
-  const selected = Object.fromEntries(parts.map(part => [part.id, signals.get(part.id) ?? fallbackSignal(part)]));
+  const selected = Object.fromEntries(parts.map(part => [part.id, signals.get(part.id) ?? catalogMarketSignal(part, region)]));
   const values = Object.values(selected);
   return {
     asOf: new Date().toISOString(),
     region,
     livePricedParts: values.filter(signal => !signal.usedFallback).length,
+    regionalCatalogPricedParts: values.filter(signal => signal.priceSource === "regional_catalog").length,
+    globalReferencePricedParts: values.filter(signal => signal.priceSource === "global_reference").length,
     fallbackPricedParts: values.filter(signal => signal.usedFallback).length,
     parts: selected,
   };
