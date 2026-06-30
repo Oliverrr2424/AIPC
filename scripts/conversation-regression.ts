@@ -1,5 +1,6 @@
 import { generateRagBuild } from "../src/lib/rag/ragBuildGenerator";
 import { reviseRagBuild } from "../src/lib/rag/conversationAgent";
+import { buildRetrievalQueries } from "../src/lib/rag/candidateRetriever";
 import type { PartCategory } from "../src/types/parts";
 
 delete process.env.DEEPSEEK_API_KEY;
@@ -39,7 +40,39 @@ assert(rebuilt.interaction?.action === "rebuild", "an explicit overall rejection
 assert(rebuilt.request.budget < airEdit.request.budget, "too-expensive rebuilds must lower the working budget");
 assert(rebuilt.compatibility.every(result => result.status !== "FAIL"), "rebuilt configuration must remain compatible");
 
-console.log("Conversation regressions passed: patch scope, compatibility dependencies, explanation immutability, minimal optimization, and explicit rebuild routing.");
+const whiteBaseline = await generateRagBuild("build a white pc, 3500 cad budget, fps gaming only, with 64GB RAM and a Samsung 9100 Pro 2TB", ai);
+const whiteRefine = await reviseRagBuild("i only need 32gb ram, and a cheaper ssd compared to samsung", whiteBaseline, ai);
+assert(whiteRefine.parts.ram.capacityGb === 32, "a 32GB follow-up must update RAM capacity");
+assert(whiteRefine.parts.ram.tags.includes("white"), "a RAM update must preserve the baseline white-build preference");
+assert(whiteRefine.request.preferredColor === "white", "the baseline color preference must survive a later local patch");
+assert(whiteRefine.request.ramCapacityGb === 32, "the updated RAM capacity must persist in structured request state");
+assert(whiteRefine.parts.storage.price < whiteBaseline.parts.storage.price, "a category-scoped cheaper SSD request must reduce SSD price");
+const constraintIds = (whiteRefine.request.constraints || []).map(item => item.id);
+assert(new Set(constraintIds).size === constraintIds.length, "follow-up constraints must have unique React-safe IDs");
+assert((whiteRefine.interaction?.context.length || 0) >= 4, "the turn must retain bounded multi-turn context");
+const quietBaseline = await generateRagBuild("USD 2200，主要玩 1440p 144Hz 游戏，希望安静、方便以后升级，不要 RGB。", ai);
+assert(quietBaseline.request.preferRgb !== true, "a no-RGB baseline must not prefer RGB");
+const rgbReversal = await reviseRagBuild("改成一套有rgb的配置，不要静音了", quietBaseline, ai);
+assert(rgbReversal.interaction?.action === "patch", "reversing an exclusion must patch rather than no-op");
+assert((rgbReversal.interaction?.changedParts.length || 0) > 0, "reversing the no-RGB exclusion must actually swap parts");
+assert(categories.some(category => rgbReversal.parts[category].tags.includes("rgb")), "an RGB reversal must introduce at least one RGB component");
+assert(!(rgbReversal.request.constraints || []).some(item => item.target === "lighting" && item.strength === "excluded"), "the prior no-RGB exclusion must be cleared after reversal");
+assert(rgbReversal.request.preferRgb === true && rgbReversal.request.preferQuiet === false, "the reversed preferences must persist in structured request state");
+assert(rgbReversal.compatibility.every(result => result.status !== "FAIL"), "the RGB reversal must remain compatible");
+assert(rgbReversal.parts.gpu.chipset === quietBaseline.parts.gpu.chipset, "an appearance-only change must not silently upgrade the GPU tier");
+assert(rgbReversal.parts.ram.capacityGb === quietBaseline.parts.ram.capacityGb, "an appearance-only change must not silently change RAM capacity");
+assert(rgbReversal.parts.storage.capacityTb === quietBaseline.parts.storage.capacityTb, "an appearance-only change must not silently change storage capacity");
+
+const englishQueries = buildRetrievalQueries({
+  ...whiteRefine.request,
+  useCase: "development",
+  aiWorkloads: ["本地大模型和图片生成"],
+  developerWorkloads: ["Docker、数据库和大型编译"],
+});
+assert(englishQueries.every(item => /^[\x20-\x7E]+$/.test(item.query)), "every embedding query must be normalized to English ASCII terms");
+assert(englishQueries.some(item => item.query.includes("containers docker kubernetes") && item.query.includes("local databases") && item.query.includes("large code compilation")), "non-English workload details must map to canonical English retrieval terms");
+
+console.log("Conversation regressions passed: patch scope, persistent preferences, unique constraint IDs, context retention, compatibility dependencies, explanation immutability, minimal optimization, and explicit rebuild routing.");
 }
 
 main().catch(error => {

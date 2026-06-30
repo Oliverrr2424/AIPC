@@ -1,24 +1,26 @@
 "use client";
 import { Gauge, Cpu, Cube, Lightning } from "@phosphor-icons/react";
+import { useLocale } from "@/lib/i18n/LocaleProvider";
 import type { PerformanceEstimate, NumericBenchmark } from "@/types/performance";
 
 // Shows concrete benchmark numbers (FPS, token/s, render seconds) sourced
 // from the BenchmarkResult table / curated JSON. Replaces the old "tier only"
 // panel with real numbers + sources.
 export function BenchmarkPanel({ performance }: { performance: PerformanceEstimate }) {
+  const { t } = useLocale();
   return (
     <section className="surface rounded-2xl p-6">
       <div className="flex items-start justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Benchmark estimates</h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">From public reviews — not synthetic scores</p>
+          <h2 className="text-lg font-semibold">{t("benchmark.title")}</h2>
+          <p className="mt-1 text-sm text-[var(--muted)]">{t("benchmark.subtitle")}</p>
         </div>
         <Gauge size={22} className="text-[var(--accent)]" />
       </div>
 
       <div className="mt-5 space-y-4">
         {performance.gaming && (
-          <Block icon={<Gauge size={18} />} title={`Gaming — ${performance.gaming.resolution}`}>
+          <Block icon={<Gauge size={18} />} title={`Gaming, ${performance.gaming.resolution}`}>
             {performance.gaming.estimatedFps != null ? (
               <Metric
                 big={`${performance.gaming.estimatedFps}`}
@@ -26,7 +28,7 @@ export function BenchmarkPanel({ performance }: { performance: PerformanceEstima
                 sub={`Cyberpunk 2077 Ultra · tier ${performance.gaming.estimatedFpsTier}`}
               />
             ) : (
-              <Metric big={performance.gaming.estimatedFpsTier} unit="" sub="Relative tier only — no FPS benchmark" />
+              <Metric big={performance.gaming.estimatedFpsTier} unit="" sub="Relative tier only, no FPS benchmark" />
             )}
             <SourceRow rows={performance.gaming.benchmarks} />
           </Block>
@@ -36,7 +38,7 @@ export function BenchmarkPanel({ performance }: { performance: PerformanceEstima
           <Block icon={<Lightning size={18} />} title="Local AI inference (llama.cpp Q4)">
             <div className="grid grid-cols-3 gap-2">
               {performance.ai.tokensPerSecond.map(t => (
-                <Metric key={t.model} big={t.value != null ? `${t.value}` : "—"} unit="tok/s" sub={t.model} compact />
+                <Metric key={t.model} big={t.value != null ? `${t.value}` : "N/A"} unit="tok/s" sub={t.model} compact />
               ))}
             </div>
             <p className="mt-2 text-xs text-[var(--muted)]">{performance.ai.explanation}</p>
@@ -47,9 +49,9 @@ export function BenchmarkPanel({ performance }: { performance: PerformanceEstima
         {performance.rendering && (
           <Block icon={<Cube size={18} />} title="Rendering (Blender Classroom)">
             <div className="grid grid-cols-3 gap-2">
-              <Metric big={performance.rendering.gpuRenderSeconds != null ? `${performance.rendering.gpuRenderSeconds}` : "—"} unit="s" sub="GPU (Optix/HIP)" compact />
-              <Metric big={performance.rendering.cpuRenderSeconds != null ? `${performance.rendering.cpuRenderSeconds}` : "—"} unit="s" sub="CPU" compact />
-              <Metric big={performance.rendering.cinebenchMultiScore != null ? `${performance.rendering.cinebenchMultiScore}` : "—"} unit="pts" sub="Cinebench 2024" compact />
+              <Metric big={performance.rendering.gpuRenderSeconds != null ? `${performance.rendering.gpuRenderSeconds}` : "N/A"} unit="s" sub="GPU (Optix/HIP)" compact />
+              <Metric big={performance.rendering.cpuRenderSeconds != null ? `${performance.rendering.cpuRenderSeconds}` : "N/A"} unit="s" sub="CPU" compact />
+              <Metric big={performance.rendering.cinebenchMultiScore != null ? `${performance.rendering.cinebenchMultiScore}` : "N/A"} unit="pts" sub="Cinebench 2024" compact />
             </div>
             <p className="mt-2 text-xs text-[var(--muted)]">{performance.rendering.explanation}</p>
             <SourceRow rows={performance.rendering.benchmarks} />

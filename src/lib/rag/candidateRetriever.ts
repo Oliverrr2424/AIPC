@@ -29,18 +29,32 @@ const categoryWeights: Record<PartCategory, ScoreWeights> = {
 };
 
 export function buildRetrievalQueries(request: BuildRequest) {
-  const goals = [request.useCase, request.resolution, request.targetFps && `${request.targetFps} fps`, ...(request.aiWorkloads || []), ...(request.developerWorkloads || [])];
+  const sourceWorkloads = [...(request.aiWorkloads || []), ...(request.developerWorkloads || [])].join(" ").toLowerCase();
+  const workloadTerms = request.useCase === "ai"
+    ? ["local ai inference", /llm|大模型|语言模型/.test(sourceWorkloads) && "local llm inference", /flux|diffusion|图像|绘图|生图/.test(sourceWorkloads) && "stable diffusion image generation", /train|training|训练|微调/.test(sourceWorkloads) && "machine learning training"]
+    : request.useCase === "development"
+      ? ["software development", /docker|container|容器|kubernetes|k8s/.test(sourceWorkloads) && "containers docker kubernetes", /database|数据库|sql/.test(sourceWorkloads) && "local databases", /compile|build|编译/.test(sourceWorkloads) && "large code compilation", /android|ios|mobile|移动/.test(sourceWorkloads) && "mobile application development"]
+      : request.useCase === "video"
+        ? ["video editing content creation"]
+        : request.useCase === "gaming"
+          ? ["pc gaming"]
+          : ["balanced desktop workloads"];
+  const goals = [request.useCase, request.resolution, request.targetFps && `${request.targetFps} fps`, ...workloadTerms];
   const categoryTerms: Record<PartCategory, unknown[]> = {
-    cpu: [request.preferredCpuBrand && `${request.preferredCpuBrand} cpu`, request.preferQuiet && "quiet", request.preferLowPower && "efficient low power", request.preferUpgradeability && "upgradeability"],
-    gpu: [request.preferredGpuBrand && `${request.preferredGpuBrand} gpu`, request.useCase === "ai" && `cuda vram ${request.vramPreference || 16}gb`, request.preferLowPower && "efficient low power"],
-    motherboard: [request.preferredCpuBrand, request.preferSmallFormFactor && "sff mini-itx", request.preferUpgradeability && "upgradeability", request.preferredColor],
-    ram: [request.useCase, request.preferredColor, request.preferRgb && "rgb"],
-    storage: [request.useCase, ...(request.developerWorkloads || [])],
-    cooler: [request.preferredCooling, request.preferQuiet && "quiet", request.preferredColor, request.preferRgb && "rgb"],
-    psu: [request.preferQuiet && "quiet", request.preferUpgradeability && "headroom upgradeability", request.preferredColor],
-    case: [request.preferSmallFormFactor && "sff mini-itx", request.preferredCaseStyle, request.preferredColor, request.preferRgb && "rgb", request.preferQuiet && "airflow quiet"],
+    cpu: [request.preferredCpuBrand && request.preferredCpuBrand !== "none" && `${request.preferredCpuBrand} cpu`, request.preferQuiet && "quiet", request.preferLowPower && "efficient low power", request.preferUpgradeability && "upgradeability"],
+    gpu: [request.preferredGpuBrand && request.preferredGpuBrand !== "none" && `${request.preferredGpuBrand} gpu`, request.useCase === "ai" && `cuda vram ${request.vramPreference || 16}gb`, request.preferLowPower && "efficient low power"],
+    motherboard: [request.preferredCpuBrand && request.preferredCpuBrand !== "none" && request.preferredCpuBrand, request.preferSmallFormFactor && "sff mini-itx", request.preferUpgradeability && "upgradeability", request.preferredColor && request.preferredColor !== "none" && request.preferredColor],
+    ram: [request.useCase, request.preferredColor && request.preferredColor !== "none" && request.preferredColor, request.preferRgb && "rgb"],
+    storage: [request.useCase, ...workloadTerms],
+    cooler: [request.preferredCooling && request.preferredCooling !== "none" && request.preferredCooling, request.preferQuiet && "quiet", request.preferredColor && request.preferredColor !== "none" && request.preferredColor, request.preferRgb && "rgb"],
+    psu: [request.preferQuiet && "quiet", request.preferUpgradeability && "headroom upgradeability", request.preferredColor && request.preferredColor !== "none" && request.preferredColor],
+    case: [request.preferSmallFormFactor && "sff mini-itx", request.preferredCaseStyle && request.preferredCaseStyle !== "none" && request.preferredCaseStyle, request.preferredColor && request.preferredColor !== "none" && request.preferredColor, request.preferRgb && "rgb", request.preferQuiet && "airflow quiet"],
   };
-  return categories.map(category => ({ category, query: [...goals, ...categoryTerms[category], category].filter(Boolean).join(" ") }));
+  return categories.map(category => ({
+    category,
+    // Never pass user-authored free text to the English-only embedding model.
+    query: [...goals, ...categoryTerms[category], category].filter(Boolean).join(" ").replace(/[^\x20-\x7E]+/g, " ").replace(/\s+/g, " ").trim(),
+  }));
 }
 
 function performance(part: Part, request: BuildRequest) {

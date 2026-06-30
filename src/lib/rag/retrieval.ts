@@ -58,6 +58,9 @@ const fallbackRetriever = new KeywordKnowledgeRetriever("keyword-fallback");
 const vectorRetriever = new PgVectorKnowledgeRetriever();
 
 export async function retrieveKnowledgeChunks(query: string, options?: RetrievalOptions): Promise<RetrievedKnowledgeChunk[]> {
+  if (/[^\x20-\x7E]/.test(query)) {
+    throw new Error("Retrieval queries must be canonical English text; parse and normalize the user request before embedding.");
+  }
   const requestedMode = process.env.RAG_RETRIEVAL_MODE?.toLowerCase();
   if (requestedMode === "keyword") return keywordRetriever.retrieve(query, options);
   if (!semanticRetrievalConfigured()) {

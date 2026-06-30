@@ -7,6 +7,7 @@ export async function generateRagExplanation(build: Omit<RagBuildRecommendation,
   const prompt = `You are a PC hardware expert. The per-part rationale and retrieved evidence are already shown to the user above, so do NOT repeat them.
 
 Hard rules:
+- Write all prose in English regardless of the user's input language.
 - Never change or invent parts, prices, compatibility, benchmarks, inventory, or availability.
 - Output ONLY three short Markdown sections with these exact headings: ## Summary, ## Trade-offs, ## Upgrade path.
 - Each section: 1-3 concise sentences. No bullet lists, no per-part breakdowns.

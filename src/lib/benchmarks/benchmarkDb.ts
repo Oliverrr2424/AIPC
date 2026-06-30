@@ -34,20 +34,26 @@ interface SeedRow {
 const seedRows: SeedRow[] = (benchmarkSeed as { results: SeedRow[] }).results;
 
 export async function getBenchmarksForPart(partId: string): Promise<BenchmarkRow[]> {
-  const dbRows = await prisma.benchmarkResult.findMany({ where: { partId } });
-  if (dbRows.length > 0) {
-    return dbRows.map(r => ({
-      partId: r.partId,
-      benchmarkKey: r.benchmarkKey,
-      benchmarkKind: r.benchmarkKind,
-      workload: r.workload,
-      resolution: r.resolution,
-      quality: r.quality,
-      value: r.value,
-      unit: r.unit,
-      sourceName: r.sourceName,
-      sourceUrl: r.sourceUrl,
-    }));
+  try {
+    const dbRows = await prisma.benchmarkResult.findMany({ where: { partId } });
+    if (dbRows.length > 0) {
+      return dbRows.map(r => ({
+        partId: r.partId,
+        benchmarkKey: r.benchmarkKey,
+        benchmarkKind: r.benchmarkKind,
+        workload: r.workload,
+        resolution: r.resolution,
+        quality: r.quality,
+        value: r.value,
+        unit: r.unit,
+        sourceName: r.sourceName,
+        sourceUrl: r.sourceUrl,
+      }));
+    }
+  } catch (error) {
+    // DB unreachable or not migrated — degrade to the in-memory seed so the
+    // app keeps working without a running database (mirrors marketSignals).
+    console.warn("[benchmarks] DB unavailable, using seed data:", error instanceof Error ? error.message : error);
   }
   return seedRows.filter(r => r.partId === partId).map(r => ({
     partId: r.partId,

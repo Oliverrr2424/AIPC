@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbo",
+    "dev": "bash scripts/dev.sh",
+    "dev:next": "next dev --turbo",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
@@ -38,12 +39,14 @@
     "prisma": "^6.19.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "recharts": "^2.15.1"
+    "recharts": "^2.15.1",
+    "three": "^0.180.0"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
+    "@types/three": "^0.180.0",
     "autoprefixer": "^10.4.21",
     "playwright": "^1.61.1",
     "postcss": "^8.5.15",

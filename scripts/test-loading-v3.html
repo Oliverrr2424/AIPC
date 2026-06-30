@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ultimate LLM + RAG 3D Loading Loop</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #030308;
+            font-family: 'Segoe UI', 'Roboto', sans-serif;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            align-items: center;
+            padding-bottom: 10vh;
+            box-sizing: border-box;
+            background: radial-gradient(circle at center, transparent 40%, rgba(3,3,8,0.9) 100%);
+        }
+        .loading-title {
+            font-size: 26px;
+            font-weight: 700;
+            letter-spacing: 5px;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            color: #ffffff;
+            text-shadow: 0 0 15px rgba(0, 242, 254, 0.8), 0 0 30px rgba(0, 242, 254, 0.4);
+        }
+        .status-container {
+            height: 24px;
+            margin-bottom: 25px;
+            overflow: hidden;
+            position: relative;
+        }
+        .status-text {
+            font-size: 15px;
+            color: #b0c0d0;
+            letter-spacing: 1.5px;
+            text-align: center;
+            animation: fadeText 0.4s ease-out;
+        }
+        @keyframes fadeText {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .progress-bar-container {
+            width: 320px;
+            height: 3px;
+            background: rgba(255, 255, 255, 0.1);
+            position: relative;
+            border-radius: 3px;
+        }
+        .progress-fill {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #00f2fe, #4facfe, #00f2fe);
+            background-size: 200% 100%;
+            box-shadow: 0 0 10px #00f2fe, 0 0 20px #4facfe;
+            border-radius: 3px;
+            transition: width 0.1s linear;
+            animation: flow 2s linear infinite;
+        }
+        @keyframes flow {
+            0% { background-position: 100% 0; }
+            100% { background-position: -100% 0; }
+        }
+    </style>
+    
+    <!-- Three.js & Postprocessing -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    <div id="ui-layer">
+        <div class="loading-title">NEXUS CORE SYSTEM</div>
+        <div class="status-container">
+            <div class="status-text" id="status">系统初始化...</div>
+        </div>
+        <div class="progress-bar-container">
+            <div class="progress-fill" id="progress"></div>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. 基础场景设置 ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x030308, 0.02);
+
+        // 相机调整为侧面稍微俯视，完美展示海景房内部
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(6, 4, 28);
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.physicallyCorrectLights = true; 
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.4;
+        container.appendChild(renderer.domElement);
+
+        // --- 2. 辉光特效 (Bloom) ---
+        const renderScene = new THREE.RenderPass(scene, camera);
+        const bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.2, 0.6, 0.85);
+        const composer = new THREE.EffectComposer(renderer);
+        composer.addPass(renderScene);
+        composer.addPass(bloomPass);
+
+        // --- 3. 光照系统 ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
+        scene.add(ambientLight);
+
+        const mainLight = new THREE.DirectionalLight(0xffffff, 4.0);
+        mainLight.position.set(10, 20, 20);
+        mainLight.castShadow = true;
+        scene.add(mainLight);
+
+        // 内部氛围补光
+        const insideLight = new THREE.PointLight(0xffffff, 2.0, 15);
+        insideLight.position.set(0, 0, 5);
+        scene.add(insideLight);
+
+        // --- 4. 材质库 ---
+        const themeColor = 0x00f2fe;
+        
+        const matPCB = new THREE.MeshStandardMaterial({ color: 0x15151e, roughness: 0.9, metalness: 0.2 });
+        const matMetal = new THREE.MeshStandardMaterial({ color: 0xdddddd, roughness: 0.3, metalness: 0.9 });
+        const matDarkMetal = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.6, metalness: 0.8 });
+        const matChip = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.7, metalness: 0.5 });
+        const matGold = new THREE.MeshStandardMaterial({ color: 0xffcc00, roughness: 0.3, metalness: 1.0 });
+        
+        // 全局动态 RGB 材质
+        const matGlowRGB = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 3.5, metalness: 0 });
+        
+        const matGlass = new THREE.MeshPhysicalMaterial({  
+            color: 0xaaccff, metalness: 0.1, roughness: 0.05, transmission: 0.9, transparent: true, opacity: 0.15, side: THREE.DoubleSide
+        });
+
+        const allFans = [];
+
+        // --- 5. 直立系组件生成工厂 ---
+
+        function createFan(radius, colorMat) {
+            const group = new THREE.Group();
+            const frame = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.05, 8, 32), matDarkMetal);
+            const hub = new THREE.Mesh(new THREE.CylinderGeometry(radius*0.3, radius*0.3, 0.15, 16), matMetal);
+            hub.rotation.x = Math.PI/2;
+            const bladeGeom = new THREE.BoxGeometry(radius*1.8, 0.02, radius*1.8);
+            const bladeMat = new THREE.MeshStandardMaterial({color: 0x111111, transparent:true, opacity:0.9});
+            const blades = new THREE.Mesh(bladeGeom, bladeMat);
+            blades.rotation.x = Math.PI/2;
+            
+            // 环形 RGB
+            const ring = new THREE.Mesh(new THREE.TorusGeometry(radius*0.85, 0.08, 16, 32), colorMat);
+            const hubGlow = new THREE.Mesh(new THREE.CylinderGeometry(radius*0.2, radius*0.2, 0.16, 16), colorMat);
+            hubGlow.rotation.x = Math.PI/2;
+            
+            const rotor = new THREE.Group();
+            rotor.add(hub);
+            rotor.add(hubGlow);
+            rotor.add(blades);
+            
+            group.add(frame);
+            group.add(ring);
+            group.add(rotor);
+            
+            allFans.push(rotor); 
+            return group;
+        }
+
+        // 1. 竖立的主板 (XY平面)
+        function buildMotherboard() {
+            const group = new THREE.Group();
+            // 基板
+            const base = new THREE.Mesh(new THREE.BoxGeometry(8.5, 9.5, 0.2), matPCB);
+            base.receiveShadow = true; 
+            group.add(base);
+            
+            // 左侧 IO 护甲
+            const ioCover = new THREE.Mesh(new THREE.BoxGeometry(1.5, 9.0, 1.2), matDarkMetal);
+            ioCover.position.set(-3.5, 0.0, 0.6);
+            group.add(ioCover);
+            
+            // IO 护甲上的 RGB 灯条
+            const ioRGB = new THREE.Mesh(new THREE.BoxGeometry(1.55, 5.0, 0.1), matGlowRGB);
+            ioRGB.position.set(-3.5, 1.0, 1.25);
+            group.add(ioRGB);
+
+            // CPU 扣具底座
+            const socketFrame = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.2, 0.25), matMetal);
+            socketFrame.position.set(-1.0, 2.0, 0.1);
+            group.add(socketFrame);
+            
+            // VRM 供电电容列阵 (CPU左侧)
+            for(let i=0; i<6; i++) {
+                const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.3, 16), matDarkMetal);
+                cap.rotation.x = Math.PI/2;
+                cap.position.set(-2.5, 0.5 + i*0.6, 0.25);
+                group.add(cap);
+            }
+
+            // 南桥装甲
+            const chipset = new THREE.Mesh(new THREE.BoxGeometry(2.5, 2.5, 0.4), matDarkMetal);
+            chipset.position.set(2.0, -3.0, 0.2);
+            group.add(chipset);
+
+            // 竖向排列的 PCIe 插槽
+            for(let i=0; i<3; i++) {
+                const slot = new THREE.Mesh(new THREE.BoxGeometry(5.0, 0.35, 0.25), matChip);
+                slot.position.set(-0.5, -0.8 - i*1.4, 0.2); 
+                const slotArmor = new THREE.Mesh(new THREE.BoxGeometry(5.1, 0.4, 0.2), matMetal);
+                slotArmor.position.set(-0.5, -0.8 - i*1.4, 0.15);
+                group.add(slot);
+                group.add(slotArmor);
+            }
+            return group;
+        }
+
+        // 2. CPU
+        function buildCPU() {
+            const group = new THREE.Group();
+            const pcb = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.6, 0.1), matPCB);
+            const ihs = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.3, 0.15), matMetal);
+            ihs.position.z = 0.125;
+            group.add(pcb);
+            group.add(ihs);
+            return group;
+        }
+
+        // 3. LCD 全息水冷头 (参考图片)
+        function buildCooler() {
+            const group = new THREE.Group();
+            // 方形冷头基座
+            const block = new THREE.Mesh(new THREE.BoxGeometry(2.5, 2.0, 1.2), matDarkMetal);
+            block.position.z = 0.6;
+            // 正面 LCD 屏幕发光层
+            const screen = new THREE.Mesh(new THREE.BoxGeometry(2.3, 1.8, 0.1), matGlowRGB);
+            screen.position.z = 1.25;
+            
+            group.add(block);
+            group.add(screen);
+            return group;
+        }
+
+        // 4. 垂直内存条
+        function buildRAM() {
+            const group = new THREE.Group();
+            const stick = new THREE.Mesh(new THREE.BoxGeometry(0.12, 3.8, 1.4), matDarkMetal);
+            stick.position.z = 0.7;
+            const rgb = new THREE.Mesh(new THREE.BoxGeometry(0.1, 3.7, 0.2), matGlowRGB);
+            rgb.position.z = 1.45; // 朝外发光
+            const pins = new THREE.Mesh(new THREE.BoxGeometry(0.05, 3.7, 0.2), matGold);
+            pins.position.z = -0.05; 
+            
+            group.add(stick);
+            group.add(rgb);
+            group.add(pins);
+            return group;
+        }
+
+        // 5. 显卡 (水平插入，风扇朝下)
+        function buildGPU() {
+            const group = new THREE.Group();
+            // PCB
+            const pcb = new THREE.Mesh(new THREE.BoxGeometry(7.5, 0.1, 3.2), matPCB);
+            // 顶部金属背板
+            const backplate = new THREE.Mesh(new THREE.BoxGeometry(7.5, 0.1, 3.2), matMetal);
+            backplate.position.y = 0.1;
+            // 散热鳍片 (-Y向下)
+            const fins = new THREE.Mesh(new THREE.BoxGeometry(7.3, 1.2, 3.0), matDarkMetal);
+            fins.position.y = -0.6;
+            // 底部风扇护罩
+            const shroud = new THREE.Mesh(new THREE.BoxGeometry(7.7, 0.3, 3.4), matDarkMetal);
+            shroud.position.y = -1.35;
+            
+            // 侧面发光信仰灯 (面向屏幕 +Z)
+            const sideGlow = new THREE.Mesh(new THREE.BoxGeometry(6.5, 0.3, 0.1), matGlowRGB);
+            sideGlow.position.set(0, -0.6, 1.55); 
+            
+            group.add(pcb);
+            group.add(backplate);
+            group.add(fins);
+            group.add(shroud);
+            group.add(sideGlow);
+
+            // 显卡自带 3 风扇 (朝下)
+            for(let i=-1; i<=1; i++) {
+                const fan = createFan(0.9, matGlowRGB);
+                fan.rotation.x = Math.PI/2; 
+                fan.position.set(i*2.3, -1.4, 0);
+                group.add(fan);
+            }
+            return group;
+        }
+
+        // 6. 极致海景房机箱 (薄型设计 + 全玻璃包裹)
+        function buildCase() {
+            const group = new THREE.Group();
+            const caseDepth = 5; // 变薄：从 7 缩减至 5
+            const caseZ = -0.5;
+            const frontZ = caseZ + caseDepth; // 4.5
+            const centerZ = caseZ + caseDepth / 2; // 2.0
+            
+            // 机箱主框架壁
+            const backPlate = new THREE.Mesh(new THREE.BoxGeometry(16, 15, 0.2), matDarkMetal);
+            backPlate.position.set(0, 0, caseZ);
+            group.add(backPlate);
+
+            // 顶部和底部金属框架条（仅边缘框架，中间用玻璃填充）
+            const bottomFrame = new THREE.Mesh(new THREE.BoxGeometry(16, 1.5, caseDepth), matDarkMetal);
+            bottomFrame.position.set(0, -7.0, centerZ);
+            group.add(bottomFrame);
+
+            const topFrame = new THREE.Mesh(new THREE.BoxGeometry(16, 1.5, caseDepth), matDarkMetal);
+            topFrame.position.set(0, 7.0, centerZ);
+            group.add(topFrame);
+
+            // 左右金属立柱
+            const leftPost = new THREE.Mesh(new THREE.BoxGeometry(0.3, 15, caseDepth), matDarkMetal);
+            leftPost.position.set(-8.0, 0, centerZ);
+            group.add(leftPost);
+
+            const rightPost = new THREE.Mesh(new THREE.BoxGeometry(0.3, 15, caseDepth), matDarkMetal);
+            rightPost.position.set(8.0, 0, centerZ);
+            group.add(rightPost);
+
+            // ================= 完美 10 风扇风道 =================
+            // 1. 顶部 3x 排风 (冷排) - 向下压
+            for(let i=-1; i<=1; i++) {
+                const fan = createFan(1.15, matGlowRGB);
+                fan.rotation.x = Math.PI/2;
+                fan.position.set(i * 3.6, 6.2, centerZ);
+                group.add(fan);
+            }
+
+            // 2. 底部 3x 进风 - 显卡下方朝上
+            for(let i=-1; i<=1; i++) {
+                const fan = createFan(1.15, matGlowRGB);
+                fan.rotation.x = Math.PI/2;
+                fan.position.set(i * 3.6, -6.2, centerZ);
+                group.add(fan);
+            }
+
+            // 3. 内存右侧墙面 3x 进风 (面向镜头 XY平面)
+            for(let i=-1; i<=1; i++) {
+                const fan = createFan(1.15, matGlowRGB);
+                fan.position.set(6.2, i * 3.3, 0.5);
+                group.add(fan);
+            }
+
+            // 4. 左侧后置 1x 排风 (远离内存，靠近上方 YZ平面)
+            const rearFan = createFan(1.0, matGlowRGB);
+            rearFan.rotation.y = Math.PI/2;
+            rearFan.position.set(-7.5, 4.0, centerZ - 0.5);
+            group.add(rearFan);
+            // ===================================================
+
+            // ============ 全景玻璃包裹所有缺口 ============
+            // 前面板玻璃
+            const frontGlass = new THREE.Mesh(new THREE.BoxGeometry(15.4, 13, 0.1), matGlass);
+            frontGlass.position.set(0, 0, frontZ);
+            group.add(frontGlass);
+
+            // 左侧玻璃
+            const leftGlass = new THREE.Mesh(new THREE.BoxGeometry(0.1, 13, caseDepth - 0.3), matGlass);
+            leftGlass.position.set(-7.9, 0, centerZ);
+            group.add(leftGlass);
+
+            // 右侧玻璃 (新增，包裹右侧缺口)
+            const rightGlass = new THREE.Mesh(new THREE.BoxGeometry(0.1, 13, caseDepth - 0.3), matGlass);
+            rightGlass.position.set(7.9, 0, centerZ);
+            group.add(rightGlass);
+
+            // 顶部玻璃 (新增，包裹顶部缺口)
+            const topGlass = new THREE.Mesh(new THREE.BoxGeometry(15.4, 0.1, caseDepth - 0.3), matGlass);
+            topGlass.position.set(0, 6.2, centerZ);
+            group.add(topGlass);
+
+            // 底部玻璃 (新增，包裹底部缺口)
+            const bottomGlass = new THREE.Mesh(new THREE.BoxGeometry(15.4, 0.1, caseDepth - 0.3), matGlass);
+            bottomGlass.position.set(0, -6.2, centerZ);
+            group.add(bottomGlass);
+            // ===============================================
+
+            return group;
+        }
+
+        // --- 6. 场景组装与动画路径 ---
+        const pcGroup = new THREE.Group();
+        scene.add(pcGroup);
+        const parts = [];
+
+        // 统一组件挂载逻辑 (因为现在Y是上下，我们让组件从机箱正面玻璃外也就是 +Z 飞入并落位)
+        function addPart(mesh, startZOffset, endPos, endRot, startTime, duration, text) {
+            const startPos = new THREE.Vector3(endPos.x, endPos.y, endPos.z + startZOffset);
+            parts.push({
+                mesh: mesh,
+                startPos: startPos, endPos: endPos,
+                startRot: new THREE.Vector3(0, Math.PI, 0), endRot: endRot,
+                startTime: startTime, duration: duration, text: text
+            });
+            pcGroup.add(mesh);
+        }
+
+        // 1. 主板
+        addPart(buildMotherboard(), 15, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0,0,0), 0, 1500, "部署知识主板框架 (Foundation Layer)");
+        
+        // 2. CPU
+        addPart(buildCPU(), 12, new THREE.Vector3(-1.0, 2.0, 0.25), new THREE.Vector3(0,0,0), 1200, 1200, "挂载 LLM 语义核心 (Neural Processor)");
+        
+        // 3. 内存 x4
+        const ramGroup = new THREE.Group();
+        for(let i=0; i<4; i++) {
+            const ram = buildRAM();
+            ram.position.set(1.4 + i*0.5, 2.0, 0); // 在CPU右侧
+            ramGroup.add(ram);
+        }
+        addPart(ramGroup, 12, new THREE.Vector3(0, 0, 0.25), new THREE.Vector3(0,0,0), 2200, 1500, "注入高频 RAG 记忆体 (Vector RAM)");
+        
+        // 4. 全息水冷头
+        addPart(buildCooler(), 15, new THREE.Vector3(-1.0, 2.0, 0.4), new THREE.Vector3(0,0,0), 3500, 1200, "接入神经冷却系统 (AIO Liquid Loop)");
+
+        // 5. 显卡 (插在主板中下部 PCIe，向外伸出)
+        addPart(buildGPU(), 15, new THREE.Vector3(1.5, -2.2, 1.8), new THREE.Vector3(0,0,0), 4800, 1500, "配置张量加速矩阵 (Tensor GPU)");
+
+        // 6. 海景房机箱
+        const caseMesh = buildCase();
+        parts.push({
+            mesh: caseMesh,
+            startPos: new THREE.Vector3(0, 0, -25), // 机箱从后方推入包覆
+            endPos: new THREE.Vector3(0, 0, 0),
+            startRot: new THREE.Vector3(0, 0, 0), endRot: new THREE.Vector3(0, 0, 0),
+            startTime: 6200, duration: 2000, text: "系统环境封装 (Panorama Enclosure)"
+        });
+        pcGroup.add(caseMesh);
+
+        parts.forEach(p => {
+            p.mesh.position.copy(p.startPos);
+            p.mesh.rotation.setFromVector3(p.startRot);
+            p.mesh.visible = false;
+        });
+
+        // --- 7. 交互视差与动画循环 ---
+        let mouseX = 0;
+        let mouseY = 0;
+        const targetCameraPos = new THREE.Vector3(6, 4, 28);
+        
+        document.addEventListener('mousemove', (event) => {
+            mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+            mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
+        });
+
+        const statusEl = document.getElementById('status');
+        const progressEl = document.getElementById('progress');
+        
+        function easeInOutQuart(x) {
+            return x < 0.5 ? 8 * x * x * x * x : 1 - Math.pow(-2 * x + 2, 4) / 2;
+        }
+
+        const ASSEMBLY_TIME = 8500; 
+        const IDLE_TIME = 4000;     
+        const DISASSEMBLY_TIME = 2000; 
+        const TOTAL_CYCLE_TIME = ASSEMBLY_TIME + IDLE_TIME + DISASSEMBLY_TIME;
+
+        let lastText = "";
+        function updateUI(text, progress) {
+            if (text && text !== lastText) {
+                statusEl.innerText = text;
+                statusEl.style.animation = 'none';
+                statusEl.offsetHeight; 
+                statusEl.style.animation = null;
+                lastText = text;
+            }
+            progressEl.style.width = progress + '%';
+        }
+
+        function animate(timestamp) {
+            requestAnimationFrame(animate);
+
+            const cycleTime = timestamp % TOTAL_CYCLE_TIME;
+            let currentPhase = 'ASSEMBLY';
+            let phaseProgress = 0;
+
+            if (cycleTime < ASSEMBLY_TIME) {
+                currentPhase = 'ASSEMBLY';
+                phaseProgress = cycleTime / ASSEMBLY_TIME;
+                let activeText = "";
+                parts.forEach((p) => {
+                    if (cycleTime >= p.startTime) {
+                        p.mesh.visible = true;
+                        const partT = Math.min((cycleTime - p.startTime) / p.duration, 1);
+                        const easedT = easeInOutQuart(partT); 
+                        
+                        p.mesh.position.lerpVectors(p.startPos, p.endPos, easedT);
+                        p.mesh.quaternion.slerpQuaternions(
+                            new THREE.Quaternion().setFromEuler(new THREE.Euler().setFromVector3(p.startRot)),
+                            new THREE.Quaternion().setFromEuler(new THREE.Euler().setFromVector3(p.endRot)),
+                            easedT
+                        );
+                        if (partT < 1) activeText = p.text;
+                    } else {
+                        p.mesh.visible = false;
+                        p.mesh.position.copy(p.startPos);
+                    }
+                });
+                updateUI(activeText || "系统集成完毕...", (phaseProgress * 75));
+
+            } else if (cycleTime < ASSEMBLY_TIME + IDLE_TIME) {
+                currentPhase = 'IDLE';
+                updateUI("ALL SYSTEMS GO // 认知引擎在线", 75 + ((cycleTime - ASSEMBLY_TIME) / IDLE_TIME * 25));
+                parts.forEach(p => {
+                    p.mesh.visible = true;
+                    p.mesh.position.copy(p.endPos);
+                    p.mesh.rotation.setFromVector3(p.endRot);
+                });
+            } else {
+                currentPhase = 'DISASSEMBLY';
+                const disassembleT = (cycleTime - ASSEMBLY_TIME - IDLE_TIME) / DISASSEMBLY_TIME;
+                updateUI("重置协议启动...", 100 - (disassembleT * 100));
+                parts.forEach(p => {
+                    p.mesh.position.lerpVectors(p.endPos, p.startPos, disassembleT * disassembleT);
+                });
+            }
+
+            // 七色渐变 RGB：红→橙→黄→绿→青→蓝→紫 全光谱循环
+            const hue = (timestamp * 0.0002) % 1.0;
+            matGlowRGB.color.setHSL(hue, 1.0, 0.6);
+            matGlowRGB.emissive.setHSL(hue, 1.0, 0.6);
+
+            // 鼠标视差偏移透视
+            targetCameraPos.x = 6 + mouseX * 6; 
+            targetCameraPos.y = 4 + mouseY * 4;
+            camera.position.lerp(targetCameraPos, 0.05);
+            camera.lookAt(0, 0, 0);
+
+            // 细微的整体悬浮感
+            pcGroup.rotation.y = Math.sin(timestamp * 0.0002) * 0.15;
+            pcGroup.position.y = Math.sin(timestamp * 0.001) * 0.3;
+
+            // 13把风扇全局转动
+            const fanSpeed = currentPhase === 'IDLE' ? 0.35 : 0.1; 
+            allFans.forEach(rotor => rotor.rotation.z -= fanSpeed);
+
+            composer.render();
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate(0);
+    </script>
+</body>
+</html>

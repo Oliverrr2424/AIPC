@@ -35,6 +35,7 @@ function normalize(values: number[]) {
 
 function instructedText(text: string, purpose: EmbeddingPurpose, model: string) {
   if (embeddingProvider() === "local") return `${purpose === "document" ? "passage" : "query"}: ${text}`;
+  if (embeddingProvider() === "ollama" && /nomic[-/]embed/i.test(model)) return `${purpose === "document" ? "search_document" : "search_query"}: ${text}`;
   if (embeddingProvider() === "ollama") return text;
   if (model !== "gemini-embedding-2") return text;
   const instruction = purpose === "document"
@@ -61,7 +62,10 @@ export async function embedText(text: string, purpose: EmbeddingPurpose): Promis
     if (!baseUrl) throw new Error("OLLAMA_EMBEDDING_URL is required when EMBEDDING_PROVIDER=ollama.");
     const res = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/embeddings`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(process.env.OLLAMA_EMBEDDING_API_KEY?.trim() ? { Authorization: `Bearer ${process.env.OLLAMA_EMBEDDING_API_KEY.trim()}` } : {}),
+      },
       body: JSON.stringify({ model, input: instructedText(text, purpose, model), dimensions: EMBEDDING_DIMENSIONS }),
     });
     if (!res.ok) throw new Error(`Ollama embedding request failed: ${res.status} ${await res.text()}`);

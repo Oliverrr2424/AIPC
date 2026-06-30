@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { generateRagBuild } from "@/lib/rag/ragBuildGenerator";
+import { generateRagBuild, type RagProgressStage } from "@/lib/rag/ragBuildGenerator";
 import { reviseRagBuild } from "@/lib/rag/conversationAgent";
 import { ConstraintConflictError } from "@/lib/rag/constraintConflict";
 import { partById } from "@/data/parts";
@@ -20,7 +20,7 @@ function restoreKnownParts(value: unknown): RagBuildRecommendation | undefined {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { query?: string; model?: unknown; thinking?: ThinkingMode; currentBuild?: unknown };
+    const body = await request.json() as { query?: string; model?: unknown; thinking?: ThinkingMode; currentBuild?: unknown; progressStream?: boolean };
     const currentBuild = restoreKnownParts(body.currentBuild);
     const minimumLength = currentBuild ? 2 : 8;
     if (!body.query || body.query.trim().length < minimumLength) return NextResponse.json({ error: currentBuild ? "Tell me what to change or ask about the build." : "Please describe your budget and intended workload." }, { status: 400 });
@@ -29,6 +29,23 @@ export async function POST(request: Request) {
       model: isAiModelId(body.model) ? body.model : DEFAULT_AI_OPTIONS.model,
       thinking: body.thinking === "enabled" ? "enabled" as const : "disabled" as const,
     };
+    if (body.progressStream && !currentBuild) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          const send = (value: unknown) => controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`));
+          const reportProgress = (stage: RagProgressStage) => send({ type: "stage", stage });
+          void generateRagBuild(body.query!.trim(), ai, reportProgress)
+            .then(data => { send({ type: "result", data }); controller.close(); })
+            .catch(error => {
+              console.error("RAG recommendation failed:", error instanceof Error ? error.message : "Unknown error");
+              send({ type: "error", error: "Unable to generate a RAG recommendation." });
+              controller.close();
+            });
+        },
+      });
+      return new Response(stream, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache, no-transform" } });
+    }
     return NextResponse.json(currentBuild ? await reviseRagBuild(body.query.trim(), currentBuild, ai) : await generateRagBuild(body.query.trim(), ai));
   } catch (error) {
     if (error instanceof ConstraintConflictError) {

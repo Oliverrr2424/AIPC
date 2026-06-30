@@ -11,6 +11,9 @@ import { optimizeBuild } from "./buildOptimizer";
 import { parseBuildIntent } from "./intentParser";
 import { generateRagExplanation } from "./ragExplanation";
 
+export type RagProgressStage = "llm-intent" | "rag-retrieval" | "llm-explanation";
+type ProgressReporter = (stage: RagProgressStage) => void;
+
 const selectedCandidate = (candidates: PartCandidate[], part: Part) => candidates.find(candidate => candidate.part.id === part.id) || candidates[0];
 
 function makeAlternatives(parts: BuildParts, pools: Awaited<ReturnType<typeof retrieveCandidatePools>>["pools"], currency: Currency): AlternativeBuildSummary[] {
@@ -25,7 +28,7 @@ function makeAlternatives(parts: BuildParts, pools: Awaited<ReturnType<typeof re
   return alternatives.slice(0, 3);
 }
 
-export async function generateRagBuildFromRequest(sourceQuery: string, ai: AiGenerationOptions, request: BuildRequest, parserMode: IntentParseResult["mode"]): Promise<RagBuildRecommendation> {
+export async function generateRagBuildFromRequest(sourceQuery: string, ai: AiGenerationOptions, request: BuildRequest, parserMode: IntentParseResult["mode"], reportProgress?: ProgressReporter): Promise<RagBuildRecommendation> {
   const { pools, chunks, retrieval, marketSignals } = await retrieveCandidatePools(request, sourceQuery);
   // Whole-build optimizer: maximize total capability/quality subject to the
   // budget (hard) and all compatibility rules. Replaces the old greedy "pool
@@ -70,10 +73,13 @@ export async function generateRagBuildFromRequest(sourceQuery: string, ai: AiGen
       ],
     },
   };
+  reportProgress?.("llm-explanation");
   return { ...raw, explanation: await generateRagExplanation(raw, ai) };
 }
 
-export async function generateRagBuild(sourceQuery: string, ai: AiGenerationOptions): Promise<RagBuildRecommendation> {
+export async function generateRagBuild(sourceQuery: string, ai: AiGenerationOptions, reportProgress?: ProgressReporter): Promise<RagBuildRecommendation> {
+  reportProgress?.("llm-intent");
   const intent = await parseBuildIntent(sourceQuery, ai);
-  return generateRagBuildFromRequest(sourceQuery, ai, intent.request, intent.mode);
+  reportProgress?.("rag-retrieval");
+  return generateRagBuildFromRequest(sourceQuery, ai, intent.request, intent.mode, reportProgress);
 }
